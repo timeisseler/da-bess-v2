@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, berechne_strategien, implementiere_strategien
+from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, berechne_strategien, implementiere_strategien, calculate_finaler_lastgang
 
 st.title("Batteriespeicher Day-Ahead Optimierung")
 st.write("Bitte geben Sie die folgenden Informationen ein und laden Sie die benötigten Dateien hoch.")
@@ -421,3 +421,199 @@ if (os.path.exists("strategien.json") and
         
 else:
     st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte (Strategien berechnen) abgeschlossen sind.")
+
+st.header("8. Finaler optimierter Lastgang")
+
+if (os.path.exists("implementierter_fahrplan.json") and 
+    os.path.exists("lastgang.json") and 
+    os.path.exists("pv-erzeugung.json")):
+    
+    # Daten für Berechnung vorbereiten
+    with open("implementierter_fahrplan.json", "r", encoding="utf-8") as f:
+        implementierter_fahrplan = json.load(f)
+    with open("lastgang.json", "r", encoding="utf-8") as f:
+        lastgang = json.load(f)
+    with open("pv-erzeugung.json", "r", encoding="utf-8") as f:
+        pv_erzeugung = json.load(f)
+    
+    # Implementierten Fahrplan in das richtige Format für die Funktion bringen
+    fahrplan_für_berechnung = [{"index": fp["index"], "timestamp": fp["timestamp"], "value": fp["value"]} for fp in implementierter_fahrplan]
+    
+    try:
+        # Finalen Lastgang berechnen (mit separater Datei!)
+        finaler_lastgang, finaler_csv = calculate_finaler_lastgang(lastgang, pv_erzeugung, fahrplan_für_berechnung)
+        
+        # KPIs des finalen Lastgangs berechnen
+        gesamtverbrauch_final = round(sum(lg['value'] for lg in finaler_lastgang)/4, 2)
+        lastspitze_final = round(max(lg['value'] for lg in finaler_lastgang), 2)
+        
+        # Vergleich mit ursprünglichem Lastgang nach Fahrplan
+        if os.path.exists("lastgang_nach_fahrplan.json"):
+            with open("lastgang_nach_fahrplan.json", "r", encoding="utf-8") as f:
+                ursprünglicher_lastgang = json.load(f)
+            
+            gesamtverbrauch_ursprünglich = round(sum(lg['value'] for lg in ursprünglicher_lastgang)/4, 2)
+            lastspitze_ursprünglich = round(max(lg['value'] for lg in ursprünglicher_lastgang), 2)
+            
+            # Kosten berechnen wenn DA-Preise verfügbar sind
+            kosten_ursprünglich = 0.0
+            kosten_final = 0.0
+            kosten_ersparnis = 0.0
+            kosten_ersparnis_prozent = 0.0
+            
+            if os.path.exists("da-prices.json"):
+                with open("da-prices.json", "r", encoding="utf-8") as f:
+                    da_prices = json.load(f)
+                
+                try:
+                    # Kosten des ursprünglichen Lastgangs berechnen
+                    _, _, kosten_ursprünglich, _ = calculate_da_costs(ursprünglicher_lastgang, da_prices)
+                    # Kosten des finalen optimierten Lastgangs berechnen
+                    _, _, kosten_final, _ = calculate_da_costs(finaler_lastgang, da_prices)
+                    # Ersparnis berechnen
+                    kosten_ersparnis = kosten_ursprünglich - kosten_final
+                    kosten_ersparnis_prozent = (kosten_ersparnis / kosten_ursprünglich * 100) if kosten_ursprünglich > 0 else 0
+                    
+                except Exception as e:
+                    st.warning(f"Kostenberechnung nicht möglich: {e}")
+            
+            # Verbesserungen berechnen
+            verbrauch_differenz = gesamtverbrauch_ursprünglich - gesamtverbrauch_final
+            lastspitze_differenz = lastspitze_ursprünglich - lastspitze_final
+            verbrauch_verbesserung = (verbrauch_differenz / gesamtverbrauch_ursprünglich * 100) if gesamtverbrauch_ursprünglich > 0 else 0
+            lastspitze_verbesserung = (lastspitze_differenz / lastspitze_ursprünglich * 100) if lastspitze_ursprünglich > 0 else 0
+            
+            # KPIs mit Vergleich anzeigen
+            st.subheader("🎯 Finaler optimierter Lastgang")
+            
+            # Erste Zeile: Verbrauch und Lastspitze
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric(
+                    label="📊 Gesamtverbrauch optimiert", 
+                    value=f"{gesamtverbrauch_final:,.2f} kWh",
+                    delta=f"{-verbrauch_differenz:,.2f} kWh", delta_color="inverse"
+                )
+            with col2:
+                st.metric(
+                    label="⚡ Lastspitze optimiert", 
+                    value=f"{lastspitze_final:,.2f} kW",
+                    delta=f"{-lastspitze_differenz:,.2f} kW", delta_color="inverse"
+                )
+            with col3:
+                st.metric(
+                    label="📈 Verbrauchsreduktion",
+                    value=f"{verbrauch_verbesserung:,.2f}%"
+                )
+            with col4:
+                st.metric(
+                    label="📉 Lastspitzenreduktion",
+                    value=f"{lastspitze_verbesserung:,.2f}%"
+                )
+            
+            # Zweite Zeile: Kosten (wenn verfügbar)
+            if os.path.exists("da-prices.json") and kosten_ursprünglich > 0:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric(
+                        label="💰 DA-Kosten optimiert",
+                        value=f"{kosten_final:,.2f} €",
+                        delta=f"{-kosten_ersparnis:,.2f} €", delta_color="inverse"
+                    )
+                with col2:
+                    st.metric(
+                        label="💸 Kosteneinsparung",
+                        value=f"{kosten_ersparnis:,.2f} €"
+                    )
+                with col3:
+                    st.metric(
+                        label="📊 Einsparung (%)",
+                        value=f"{kosten_ersparnis_prozent:,.2f}%"
+                    )
+                with col4:
+                    kosten_pro_kwh_ersparnis = (kosten_ersparnis / gesamtverbrauch_final) if gesamtverbrauch_final > 0 else 0
+                    st.metric(
+                        label="⚡ Ersparnis pro kWh",
+                        value=f"{kosten_pro_kwh_ersparnis:,.4f} €/kWh"
+                    )
+            
+            # Detailvergleich
+            st.subheader("🔍 Detailvergleich")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Ursprünglicher Lastgang:**")
+                st.metric("Gesamtverbrauch", f"{gesamtverbrauch_ursprünglich:,.2f} kWh")
+                st.metric("Lastspitze", f"{lastspitze_ursprünglich:,.2f} kW")
+                if os.path.exists("da-prices.json") and kosten_ursprünglich > 0:
+                    st.metric("Day-Ahead Kosten", f"{kosten_ursprünglich:,.2f} €")
+            with col2:
+                st.markdown("**Optimierter Lastgang:**")
+                st.metric("Gesamtverbrauch", f"{gesamtverbrauch_final:,.2f} kWh")
+                st.metric("Lastspitze", f"{lastspitze_final:,.2f} kW")
+                if os.path.exists("da-prices.json") and kosten_final > 0:
+                    st.metric("Day-Ahead Kosten", f"{kosten_final:,.2f} €")
+        
+        else:
+            # Nur finale KPIs ohne Vergleich
+            st.subheader("🎯 Finaler optimierter Lastgang")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(
+                    label="📊 Gesamtverbrauch optimiert", 
+                    value=f"{gesamtverbrauch_final:,.2f} kWh"
+                )
+            with col2:
+                st.metric(
+                    label="⚡ Lastspitze optimiert", 
+                    value=f"{lastspitze_final:,.2f} kW"
+                )
+        
+        # Vorschau des finalen Lastgangs
+        st.subheader("📋 Finaler optimierter Lastgang (Vorschau)")
+        st.success("✅ Finaler optimierter Lastgang erfolgreich berechnet!")
+        st.dataframe(pd.DataFrame(finaler_lastgang).head(10))
+        
+        # Download-Button für finalen Lastgang
+        with open(finaler_csv, "rb") as f:
+            st.download_button(
+                label="📥 Finalen optimierten Lastgang als CSV herunterladen",
+                data=f,
+                file_name="finaler_optimierter_lastgang.csv",
+                mime="text/csv"
+            )
+        
+        # Gesamtoptimierungsergebnis anzeigen
+        if os.path.exists("lastgang_nach_fahrplan.json") and os.path.exists("da-prices.json") and 'kosten_ersparnis' in locals() and kosten_ersparnis > 0:
+            st.subheader("🏆 Gesamtoptimierungsergebnis")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(
+                    label="💰 Gesamte Kosteneinsparung",
+                    value=f"{kosten_ersparnis:,.2f} €/Jahr"
+                )
+                # Capacity aus den user_inputs holen
+                if os.path.exists("user_inputs.json"):
+                    with open("user_inputs.json", "r", encoding="utf-8") as f:
+                        user_inputs = json.load(f)
+                    capacity = user_inputs.get("capacity_kWh", 1000)
+                    st.metric(
+                        label="⚡ Einsparung pro kWh verschoben",
+                        value=f"{(kosten_ersparnis / capacity):,.2f} €/(kWh·Jahr)"
+                    )
+            with col2:
+                st.metric(
+                    label="📊 Relative Einsparung", 
+                    value=f"{kosten_ersparnis_prozent:,.2f}%"
+                )
+
+        
+
+        
+    except ValueError as e:
+        st.error(f"❌ Fehler beim Berechnen des finalen Lastgangs: {e}")
+        
+else:
+    st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte (Strategien implementieren) abgeschlossen sind.")

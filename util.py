@@ -875,7 +875,7 @@ def berechne_fahrplan_kpis(fahrplan_mit_soc, implementierte_strategien, gesamt_b
     # Zyklen berechnen
     positive_aktionen = [fp["value"] for fp in fahrplan_mit_soc if fp["value"] > 0]
     anzahl_zyklen = sum(positive_aktionen) / 4 / capacity  # kWh pro Jahr
-    print(capacity)
+
     
     # Strategien-KPIs
     anzahl_implementierter_strategien = len(implementierte_strategien)
@@ -905,5 +905,34 @@ def berechne_fahrplan_kpis(fahrplan_mit_soc, implementierte_strategien, gesamt_b
     }
     
     return kpis
+
+def calculate_finaler_lastgang(lastgang, pv_erzeugung, fahrplan):
+    """
+    Berechnet den finalen Lastgang nach optimiertem Fahrplan.
+    Speichert in separate Datei um Überschreibung zu vermeiden.
+    """
+    if len(lastgang) == len(fahrplan) == len(pv_erzeugung):
+        result = []
+        for lg, fp, pv in zip(lastgang, fahrplan, pv_erzeugung):
+            assert lg['index'] == fp['index'] and lg['timestamp'] == fp['timestamp'], "Index/Timestamp mismatch!"
+            new_value = max(0, lg['value'] + fp['value'] - pv['value'])
+            result.append({
+                'index': lg['index'],
+                'timestamp': lg['timestamp'],
+                'value': round(new_value, 2)
+            })
+        # Speichern als JSON (andere Datei!)
+        with open("finaler_optimierter_lastgang.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        # Speichern als CSV
+        df_result = pd.DataFrame(result)
+        df_result_csv = df_result.copy()
+        df_result_csv['value'] = df_result_csv['value'].map(lambda x: f"{x:.2f}".replace('.', ','))
+        os.makedirs("csv", exist_ok=True)
+        resulting_csv_path = os.path.join("csv", "finaler_optimierter_lastgang.csv")
+        df_result_csv.to_csv(resulting_csv_path, index=False, sep=';')
+        return result, resulting_csv_path
+    else:
+        raise ValueError("Fehler beim Errechnen des finalen Lastgangs!")
 
 
