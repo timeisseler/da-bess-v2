@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, berechne_strategien
+from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, berechne_strategien, implementiere_strategien
 
 st.title("Batteriespeicher Day-Ahead Optimierung")
 st.write("Bitte geben Sie die folgenden Informationen ein und laden Sie die benötigten Dateien hoch.")
@@ -336,3 +336,88 @@ if (os.path.exists("konstante_soc_zeiträume.json") and
         
 else:
     st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte abgeschlossen sind, bevor Sie Strategien berechnen können.")
+
+st.header("7. Strategien implementieren")
+
+if (os.path.exists("strategien.json") and 
+    os.path.exists("fahrplan.json") and 
+    os.path.exists("user_inputs.json")):
+    
+    try:
+        implementierter_fahrplan, fahrplan_csv, kpis = implementiere_strategien(
+            "strategien.json",
+            "fahrplan.json", 
+            "user_inputs.json"
+        )
+        
+        # Haupt-KPIs anzeigen
+        st.subheader("🎯 Implementierungs-Ergebnisse")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                label="🏆 Anzahl Strategien implementiert",
+                value=f"{kpis['anzahl_implementierter_strategien']}"
+            )
+            st.metric(
+                label="💰 Gesamtprofit",
+                value=f"{kpis['gesamt_profit']:.2f} €"
+            )
+            st.metric(
+                label="📉 Min. SoC",
+                value=f"{kpis['min_soc']:.2f} kWh"
+            )
+        with col2:
+            st.metric(
+                label="🔄 Anzahl Zyklen (Jahr)",
+                value=f"{kpis['anzahl_zyklen']:.2f}"
+            )
+            durchschnitts_profit = kpis['gesamt_profit'] / kpis['anzahl_implementierter_strategien'] if kpis['anzahl_implementierter_strategien'] > 0 else 0
+            st.metric(
+                label="📈 Durchschnitts-Profit pro Strategie",
+                value=f"{durchschnitts_profit:.2f} €"
+            )
+            st.metric(
+                label="📈 Max. SoC",
+                value=f"{kpis['max_soc']:.2f} kWh"
+            )
+        with col3:
+            st.metric(
+                label="🔋 Max. Beladung",
+                value=f"{kpis['max_beladung']:.2f} kW"
+            )
+            st.metric(
+                label="🔋 Max. Entladung", 
+                value=f"{kpis['max_entladung']:.2f} kW"
+            )
+            
+        st.success("✅ Strategien erfolgreich in den Fahrplan implementiert!")
+        # Strategietypen-Verteilung
+        if kpis['strategietypen']:
+            st.subheader("📊 Strategietypen-Verteilung")
+            strategietypen_df = pd.DataFrame([
+                {"Strategietyp": typ, "Anzahl": anzahl, "Anteil": f"{anzahl/kpis['anzahl_implementierter_strategien']*100:.1f}%"} 
+                for typ, anzahl in kpis['strategietypen'].items()
+            ])
+            st.dataframe(strategietypen_df, use_container_width=True)
+        
+        # Vorschau des implementierten Fahrplans
+        st.subheader("📋 Implementierter Fahrplan (Vorschau)")
+        st.dataframe(pd.DataFrame(implementierter_fahrplan).head(10))
+        
+        # Download-Button
+        with open(fahrplan_csv, "rb") as f:
+            st.download_button(
+                label="📥 Implementierten Fahrplan als CSV herunterladen",
+                data=f,
+                file_name="implementierter_fahrplan.csv",
+                mime="text/csv"
+            )
+        
+
+        
+    except Exception as e:
+        st.error(f"❌ Fehler beim Implementieren der Strategien: {e}")
+        
+else:
+    st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte (Strategien berechnen) abgeschlossen sind.")

@@ -87,7 +87,6 @@ def calculate_da_costs(lastgang, da_prices):
     else:
         raise ValueError("Fehler beim Errechnen der Day-Ahead-Kosten!")
     
-
 def calculate_flexibilitätsband(initial_soc, lastgang, fahrplan, user_inputs):
     with open(lastgang, "r", encoding="utf-8") as f:
         lastgang = json.load(f)
@@ -196,7 +195,6 @@ def calculate_flexibilitätsband(initial_soc, lastgang, fahrplan, user_inputs):
 
     return flexband_safeguarded, flexibilitätsband_csv, max_beladung, max_entladung, max_soc, min_soc, anzahl_zyklen
 
-
 def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=12):
     """
     Findet konstante SoC-Zeiträume.
@@ -270,7 +268,6 @@ def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=12):
 
     return result, csv_path
 
-
 def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_json, user_inputs_json):
     """
     Berechnet lukrative Be- und Entladestrategien für konstante SoC-Zeiträume.
@@ -300,6 +297,7 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
     
     capacity = user_inputs["capacity_kWh"]
     min_soc = 0.05 * capacity  # Mindest-SoC
+    max_soc = 0.95 * capacity  # Maximal-SoC
     
     strategien_liste = []
     debug_info = {
@@ -324,7 +322,7 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
         basis_soc = zeitraum["soc"]
         
         # Verschiedene Strategien generieren
-        strategien = generiere_strategien(zeitraum_flexband, zeitraum_preise, basis_soc, min_soc, capacity)
+        strategien = generiere_strategien(zeitraum_flexband, zeitraum_preise, basis_soc, min_soc, max_soc)
         
         if not strategien:
             debug_info["keine_strategien_generiert"] += 1
@@ -749,5 +747,163 @@ def berechne_profit(strategie, preise_zeitraum, lastgang_zeitraum):
             profit += eingesparte_kosten
     
     return profit
+
+def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
+    """
+    Implementiert die Strategien in den Batteriespeicher-Fahrplan.
+    
+    Args:
+        strategien_json: Pfad zur JSON-Datei mit Strategien
+        fahrplan_json: Pfad zur JSON-Datei mit ursprünglichem Fahrplan
+        user_inputs_json: Pfad zur JSON-Datei mit Nutzereingaben
+    
+    Returns:
+        neuer_fahrplan, csv_path, kpis
+    """
+    # Daten laden
+    with open(strategien_json, "r", encoding="utf-8") as f:
+        strategien = json.load(f)
+    with open(fahrplan_json, "r", encoding="utf-8") as f:
+        fahrplan = json.load(f)
+    with open(user_inputs_json, "r", encoding="utf-8") as f:
+        user_inputs = json.load(f)
+    
+    capacity = user_inputs["capacity_kWh"]
+    daily_cycles = user_inputs["daily_cycles"]
+    # Bisherige Zyklen aus dem Fahrplan berechnen
+    bisherige_belademenge = 0.0
+    for eintrag in fahrplan:
+        if eintrag["value"] > 0:  # Nur positive Werte (Beladen) zählen
+            bisherige_belademenge += eintrag["value"] * 0.25  # kW * 0.25h = kWh
+    
+    bisherige_zyklen = bisherige_belademenge / capacity
+    max_belademenge = (daily_cycles * 365 - bisherige_zyklen) * capacity  # Verbleibende Jahresgrenze
+    if max_belademenge < 0:
+        max_belademenge = 0  # Keine weiteren Zyklen erlaubt
+    # Neuen Fahrplan als Kopie des ursprünglichen erstellen
+    neuer_fahrplan = [{"index": fp["index"], 
+                      "timestamp": fp["timestamp"], 
+                      "value": fp["value"]} for fp in fahrplan]
+    
+    # Tracking-Variablen
+    gesamt_belademenge = 0.0
+    implementierte_strategien = []
+    verwendete_zeiträume = set()
+    
+    # Strategien nach Profit sortiert durchgehen (höchster zuerst)
+    for strategie in strategien:
+        start_idx = strategie["start_index"] - 1  # 0-basiert
+        end_idx = strategie["end_index"] - 1      # 0-basiert
+        
+        # Prüfen ob Zeitraum bereits belegt ist
+        zeitraum_range = set(range(start_idx, end_idx + 1))
+        if zeitraum_range.intersection(verwendete_zeiträume):
+            continue  # Zeitraum überschneidet sich, Strategie überspringen
+        
+        # Belademenge dieser Strategie berechnen
+        strategie_belademenge = strategie["gesamte_lademenge"]
+        
+        # Prüfen ob Kapazitätsgrenze überschritten würde
+        if gesamt_belademenge + strategie_belademenge > max_belademenge:
+            break  # Stoppen, da Kapazitätsgrenze erreicht
+        
+        # Strategie implementieren
+        for detail in strategie["strategie_details"]:
+            idx = detail["index"] 
+            if 0 <= idx < len(neuer_fahrplan):
+                neuer_fahrplan[idx]["value"] += detail["aktion"]
+                neuer_fahrplan[idx]["value"] = round(neuer_fahrplan[idx]["value"], 2)
+        
+        # Tracking aktualisieren
+        gesamt_belademenge += strategie_belademenge
+        implementierte_strategien.append(strategie)
+        verwendete_zeiträume.update(zeitraum_range)
+    
+    # SoC für neuen Fahrplan berechnen
+    neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity)
+    
+    # KPIs berechnen
+    kpis = berechne_fahrplan_kpis(neuer_fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity)
+    
+    # Als JSON speichern
+    with open("implementierter_fahrplan.json", "w", encoding="utf-8") as f:
+        json.dump(neuer_fahrplan_mit_soc, f, ensure_ascii=False, indent=2)
+    
+    # Als CSV speichern
+    df_fahrplan = pd.DataFrame(neuer_fahrplan_mit_soc)
+    df_fahrplan_csv = df_fahrplan.copy()
+    df_fahrplan_csv['value'] = df_fahrplan_csv['value'].map(lambda x: f"{x:.2f}".replace('.', ','))
+    df_fahrplan_csv['soc'] = df_fahrplan_csv['soc'].map(lambda x: f"{x:.2f}".replace('.', ','))
+    os.makedirs("csv", exist_ok=True)
+    csv_path = os.path.join("csv", "implementierter_fahrplan.csv")
+    df_fahrplan_csv.to_csv(csv_path, index=False, sep=';')
+    
+    return neuer_fahrplan_mit_soc, csv_path, kpis
+
+def berechne_soc_fahrplan(fahrplan, capacity):
+    """
+    Berechnet den SoC-Verlauf für einen Fahrplan.
+    """
+    fahrplan_mit_soc = []
+    soc = 0.3 * capacity  # Startwert: 30% der Kapazität
+    
+    for i, fp in enumerate(fahrplan):
+        # SoC aktualisieren basierend auf vorheriger Aktion
+        if i > 0:
+            soc += fahrplan[i-1]["value"] / 4  # 15min Intervall = /4
+            soc = max(0.05 * capacity, min(capacity, soc))  # Grenzen einhalten
+        
+        fahrplan_mit_soc.append({
+            "index": fp["index"],
+            "timestamp": fp["timestamp"],
+            "value": fp["value"],
+            "soc": round(soc, 2)
+        })
+    
+    return fahrplan_mit_soc
+
+def berechne_fahrplan_kpis(fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity):
+    """
+    Berechnet KPIs für den implementierten Fahrplan.
+    """
+    # Basis-KPIs
+    max_beladung = max([fp["value"] for fp in fahrplan_mit_soc])
+    max_entladung = min([fp["value"] for fp in fahrplan_mit_soc])
+    max_soc = max([fp["soc"] for fp in fahrplan_mit_soc])
+    min_soc = min([fp["soc"] for fp in fahrplan_mit_soc])
+    
+    # Zyklen berechnen
+    positive_aktionen = [fp["value"] for fp in fahrplan_mit_soc if fp["value"] > 0]
+    anzahl_zyklen = sum(positive_aktionen) / 4 / capacity  # kWh pro Jahr
+    print(capacity)
+    
+    # Strategien-KPIs
+    anzahl_implementierter_strategien = len(implementierte_strategien)
+    gesamt_profit = sum([s["profit_euro"] for s in implementierte_strategien])
+    
+    # Auslastung
+    kapazitäts_auslastung = (gesamt_belademenge / max_belademenge * 100) if max_belademenge > 0 else 0
+    
+    # Strategietypen-Verteilung
+    strategietypen = {}
+    for strategie in implementierte_strategien:
+        typ = strategie["strategie_typ"]
+        strategietypen[typ] = strategietypen.get(typ, 0) + 1
+    
+    kpis = {
+        "max_beladung": round(max_beladung, 2),
+        "max_entladung": round(max_entladung, 2),
+        "max_soc": round(max_soc, 2),
+        "min_soc": round(min_soc, 2),
+        "anzahl_zyklen": round(anzahl_zyklen, 2),
+        "anzahl_implementierter_strategien": anzahl_implementierter_strategien,
+        "gesamt_profit": round(gesamt_profit, 2),
+        "gesamt_belademenge": round(gesamt_belademenge, 2),
+        "max_belademenge": round(max_belademenge, 2),
+        "kapazitäts_auslastung": round(kapazitäts_auslastung, 1),
+        "strategietypen": strategietypen
+    }
+    
+    return kpis
 
 
