@@ -480,14 +480,9 @@ if (os.path.exists("implementierter_fahrplan.json") and
             # Verbesserungen berechnen
             verbrauch_differenz = gesamtverbrauch_ursprünglich - gesamtverbrauch_final
             lastspitze_differenz = lastspitze_ursprünglich - lastspitze_final
-            verbrauch_verbesserung = (verbrauch_differenz / gesamtverbrauch_ursprünglich * 100) if gesamtverbrauch_ursprünglich > 0 else 0
-            lastspitze_verbesserung = (lastspitze_differenz / lastspitze_ursprünglich * 100) if lastspitze_ursprünglich > 0 else 0
-            
-            # KPIs mit Vergleich anzeigen
-            st.subheader("🎯 Finaler optimierter Lastgang")
             
             # Erste Zeile: Verbrauch und Lastspitze
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(
                     label="📊 Gesamtverbrauch optimiert", 
@@ -501,19 +496,14 @@ if (os.path.exists("implementierter_fahrplan.json") and
                     delta=f"{-lastspitze_differenz:,.2f} kW", delta_color="inverse"
                 )
             with col3:
+                min_bezug = round(min(lg['value'] for lg in finaler_lastgang), 2)
                 st.metric(
-                    label="📈 Verbrauchsreduktion",
-                    value=f"{verbrauch_verbesserung:,.2f}%"
+                    label="⬇️ Niedrigster Bezug",
+                    value=f"{min_bezug:,.2f} kW"
                 )
-            with col4:
-                st.metric(
-                    label="📉 Lastspitzenreduktion",
-                    value=f"{lastspitze_verbesserung:,.2f}%"
-                )
-            
             # Zweite Zeile: Kosten (wenn verfügbar)
             if os.path.exists("da-prices.json") and kosten_ursprünglich > 0:
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3= st.columns(3)
                 with col1:
                     st.metric(
                         label="💰 DA-Kosten optimiert",
@@ -530,12 +520,6 @@ if (os.path.exists("implementierter_fahrplan.json") and
                         label="📊 Einsparung (%)",
                         value=f"{kosten_ersparnis_prozent:,.2f}%"
                     )
-                with col4:
-                    kosten_pro_kwh_ersparnis = (kosten_ersparnis / gesamtverbrauch_final) if gesamtverbrauch_final > 0 else 0
-                    st.metric(
-                        label="⚡ Ersparnis pro kWh",
-                        value=f"{kosten_pro_kwh_ersparnis:,.4f} €/kWh"
-                    )
             
             # Detailvergleich
             st.subheader("🔍 Detailvergleich")
@@ -547,13 +531,14 @@ if (os.path.exists("implementierter_fahrplan.json") and
                 st.metric("Lastspitze", f"{lastspitze_ursprünglich:,.2f} kW")
                 if os.path.exists("da-prices.json") and kosten_ursprünglich > 0:
                     st.metric("Day-Ahead Kosten", f"{kosten_ursprünglich:,.2f} €")
+                    st.metric("Kosten pro kWh", f"{kosten_ursprünglich/gesamtverbrauch_ursprünglich:,.4f} €/kWh")
             with col2:
                 st.markdown("**Optimierter Lastgang:**")
                 st.metric("Gesamtverbrauch", f"{gesamtverbrauch_final:,.2f} kWh")
                 st.metric("Lastspitze", f"{lastspitze_final:,.2f} kW")
                 if os.path.exists("da-prices.json") and kosten_final > 0:
                     st.metric("Day-Ahead Kosten", f"{kosten_final:,.2f} €")
-        
+                    st.metric("Kosten pro kWh", f"{kosten_final/gesamtverbrauch_final:,.4f} €/kWh")
         else:
             # Nur finale KPIs ohne Vergleich
             st.subheader("🎯 Finaler optimierter Lastgang")
