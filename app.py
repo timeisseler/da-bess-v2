@@ -3,7 +3,7 @@ import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, berechne_strategien, implementiere_strategien, calculate_finaler_lastgang
+from util import calculate_da_costs, calculate_flexibilitätsband, calculate_lastgang_after_fahrplan, convert_csv_to_json, finde_konstante_soc_zeiträume, finde_flexible_arbitrage_zeiträume, berechne_strategien, implementiere_strategien, calculate_finaler_lastgang
 
 st.title("Batteriespeicher Day-Ahead Optimierung")
 st.write("Bitte geben Sie die folgenden Informationen ein und laden Sie die benötigten Dateien hoch.")
@@ -227,16 +227,200 @@ if os.path.exists("flexband_safeguarded.json"):
     except ValueError as e:
         st.error(f"Fehler beim Finden der konstanten SoC-Zeiträume: {e}")
 
+st.header("5. 🚀 Flexible Arbitrage-Zeiträume finden")
+if os.path.exists("flexband_safeguarded.json") and os.path.exists("fahrplan.json"):
+    
+    # Erweiterte Konfiguration
+    with st.expander("⚙️ Erweiterte Einstellungen für Arbitrage-Zeiträume"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            min_länge = st.slider("Mindestlänge (Stunden)", 0.5, 6.0, 1.0, 0.25)
+        with col2:
+            soc_toleranz = st.slider("SoC Toleranz (%)", 5, 95, 20, 5)
+        with col3:
+            max_aktivität = st.slider("Max. Aktivität (%)", 5, 95, 20, 5)
+    
+    if st.button("🔍 Flexible Arbitrage-Zeiträume suchen"):
+        try:
+            min_len_intervalle = int(min_länge * 4)  # Stunden zu 15min-Intervallen
+            
+            arbitrage_zeiträume, arbitrage_csv = finde_flexible_arbitrage_zeiträume(
+                "flexband_safeguarded.json",
+                "fahrplan.json", 
+                min_len=min_len_intervalle,
+                soc_toleranz=soc_toleranz,
+                max_aktivität_prozent=max_aktivität
+            )
+            
+            # Hauptstatistiken
+            st.subheader("📊 Arbitrage-Potenzial Analyse")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric(
+                    label="🎯 Arbitrage-Zeiträume gefunden",
+                    value=len(arbitrage_zeiträume)
+                )
+            with col2:
+                total_stunden = sum(z['länge_stunden'] for z in arbitrage_zeiträume)
+                st.metric(
+                    label="⏰ Gesamt-Potenzial",
+                    value=f"{total_stunden:.1f} h"
+                )
+            with col3:
+                if arbitrage_zeiträume:
+                    avg_qualität = sum(z['qualität_score'] for z in arbitrage_zeiträume) / len(arbitrage_zeiträume)
+                    st.metric(
+                        label="⭐ Durchschnitts-Qualität", 
+                        value=f"{avg_qualität:.2f}"
+                    )
+                else:
+                    st.metric(label="⭐ Durchschnitts-Qualität", value="0.00")
+            with col4:
+                if arbitrage_zeiträume:
+                    max_zeitraum = max(arbitrage_zeiträume, key=lambda x: x['länge_stunden'])
+                    st.metric(
+                        label="🏆 Längster Zeitraum",
+                        value=f"{max_zeitraum['länge_stunden']:.1f} h"
+                    )
+                else:
+                    st.metric(label="🏆 Längster Zeitraum", value="0.0 h")
+            
+            # Qualitätsverteilung
+            if arbitrage_zeiträume:
+                st.subheader("📈 Qualitätsverteilung der Arbitrage-Zeiträume")
+                
+                hoch_qualität = [z for z in arbitrage_zeiträume if z['qualität_score'] > 0.7]
+                mittel_qualität = [z for z in arbitrage_zeiträume if 0.5 <= z['qualität_score'] <= 0.7]
+                niedrig_qualität = [z for z in arbitrage_zeiträume if z['qualität_score'] < 0.5]
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label="🟢 Hoch (>0.7)",
+                        value=len(hoch_qualität),
+                        delta=f"{sum(z['länge_stunden'] for z in hoch_qualität):.1f}h"
+                    )
+                with col2:
+                    st.metric(
+                        label="🟡 Mittel (0.5-0.7)",
+                        value=len(mittel_qualität),
+                        delta=f"{sum(z['länge_stunden'] for z in mittel_qualität):.1f}h"
+                    )
+                with col3:
+                    st.metric(
+                        label="🟠 Niedrig (<0.5)",
+                        value=len(niedrig_qualität),
+                        delta=f"{sum(z['länge_stunden'] for z in niedrig_qualität):.1f}h"
+                    )
+                
+                # Typ-Verteilung
+                st.subheader("🔍 Zeitraum-Typen")
+                soc_stabil = [z for z in arbitrage_zeiträume if z['typ'] == 'soc_stabil']
+                niedrig_aktiv = [z for z in arbitrage_zeiträume if z['typ'] == 'niedrig_aktiv']
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        label="🔒 SoC-Stabil",
+                        value=len(soc_stabil),
+                        delta=f"Ø {sum(z['qualität_score'] for z in soc_stabil)/len(soc_stabil):.2f} Qualität" if soc_stabil else "0.00 Qualität"
+                    )
+                with col2:
+                    st.metric(
+                        label="😴 Niedrig-Aktiv", 
+                        value=len(niedrig_aktiv),
+                        delta=f"Ø {sum(z['qualität_score'] for z in niedrig_aktiv)/len(niedrig_aktiv):.2f} Qualität" if niedrig_aktiv else "0.00 Qualität"
+                    )
+                
+                # Top Zeiträume
+                st.subheader("🏆 Top 10 Arbitrage-Zeiträume (nach Qualität)")
+                top_zeiträume = sorted(arbitrage_zeiträume, key=lambda x: x['qualität_score'], reverse=True)[:10]
+                
+                display_df = pd.DataFrame(top_zeiträume)
+                display_columns = ['zeitraum_id', 'typ', 'länge_stunden', 'qualität_score', 'soc_variation', 'avg_aktivität']
+                if all(col in display_df.columns for col in display_columns):
+                    st.dataframe(
+                        display_df[display_columns].round(3),
+                        use_container_width=True,
+                        column_config={
+                            "zeitraum_id": "ID",
+                            "typ": "Typ",
+                            "länge_stunden": "Länge (h)",
+                            "qualität_score": "Qualität",
+                            "soc_variation": "SoC Var. (kWh)",
+                            "avg_aktivität": "Ø Aktivität (kW)"
+                        }
+                    )
+                else:
+                    st.dataframe(display_df.head(10))
+                
+                # Downloads
+                col1, col2 = st.columns(2)
+                with col1:
+                    if arbitrage_csv:
+                        with open(arbitrage_csv, "rb") as f:
+                            st.download_button(
+                                label="📥 Arbitrage-Zeiträume CSV herunterladen",
+                                data=f,
+                                file_name="flexible_arbitrage_zeiträume.csv",
+                                mime="text/csv"
+                            )
+                with col2:
+                    with open("flexible_arbitrage_zeiträume.json", "rb") as f:
+                        st.download_button(
+                            label="📄 Arbitrage-Zeiträume JSON herunterladen",
+                            data=f,
+                            file_name="flexible_arbitrage_zeiträume.json",
+                            mime="application/json"
+                        )
+                
+                st.success(f"✅ {len(arbitrage_zeiträume)} flexible Arbitrage-Zeiträume erfolgreich identifiziert!")
+                
+                # Speichere auch für Kompatibilität
+                konstante_soc_zeiträume = arbitrage_zeiträume
+                konstante_soc_csv = arbitrage_csv
+                
+            else:
+                st.warning("⚠️ Keine Arbitrage-Zeiträume mit den aktuellen Kriterien gefunden. Versuchen Sie lockerere Einstellungen.")
+                
+        except Exception as e:
+            st.error(f"❌ Fehler beim Finden der Arbitrage-Zeiträume: {e}")
+            
+            # Fallback auf alte Methode
+            st.info("🔄 Verwende Fallback-Methode...")
+            try:
+                konstante_soc_zeiträume, konstante_soc_csv = finde_konstante_soc_zeiträume("flexband_safeguarded.json")
+                st.metric(
+                    label="📊 Zeiträume (Fallback-Methode)",
+                    value=len(konstante_soc_zeiträume)
+                )
+                if konstante_soc_zeiträume:
+                    st.dataframe(pd.DataFrame(konstante_soc_zeiträume).head(10))
+            except Exception as fallback_e:
+                st.error(f"❌ Auch Fallback-Methode fehlgeschlagen: {fallback_e}")
+else:
+    st.info("⚠️ Bitte stellen Sie sicher, dass Flexibilitätsband und Fahrplan berechnet wurden.")
+
 st.header("6. Strategien errechnen")
 
-if (os.path.exists("konstante_soc_zeiträume.json") and 
+# Prüfe welche Zeitraum-Datei verfügbar ist
+zeitraum_datei = None
+if os.path.exists("flexible_arbitrage_zeiträume.json"):
+    zeitraum_datei = "flexible_arbitrage_zeiträume.json"
+    st.info("🚀 Verwende flexible Arbitrage-Zeiträume für Strategieberechnung")
+elif os.path.exists("konstante_soc_zeiträume.json"):
+    zeitraum_datei = "konstante_soc_zeiträume.json"
+    st.info("⚙️ Verwende konstante SoC-Zeiträume für Strategieberechnung")
+
+if (zeitraum_datei and 
     os.path.exists("flexband_safeguarded.json") and 
     os.path.exists("da-prices.json") and 
     os.path.exists("user_inputs.json")):
     
     try:
         strategien_liste, strategien_csv = berechne_strategien(
-            "konstante_soc_zeiträume.json",
+            zeitraum_datei,
             "flexband_safeguarded.json", 
             "da-prices.json",
             "user_inputs.json"
@@ -335,7 +519,10 @@ if (os.path.exists("konstante_soc_zeiträume.json") and
         st.error(f"Fehler beim Berechnen der Strategien: {e}")
         
 else:
-    st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte abgeschlossen sind, bevor Sie Strategien berechnen können.")
+    if not zeitraum_datei:
+        st.warning("⚠️ Keine Zeitraum-Datei gefunden. Bitte führen Sie zuerst Schritt 5 (Zeiträume finden) aus.")
+    else:
+        st.info("⚠️ Bitte stellen Sie sicher, dass alle vorherigen Schritte abgeschlossen sind, bevor Sie Strategien berechnen können.")
 
 st.header("7. Strategien implementieren")
 

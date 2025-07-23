@@ -195,7 +195,7 @@ def calculate_flexibilitätsband(initial_soc, lastgang, fahrplan, user_inputs):
 
     return flexband_safeguarded, flexibilitätsband_csv, max_beladung, max_entladung, max_soc, min_soc, anzahl_zyklen
 
-def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=12):
+def finde_konstante_soc_zeiträume_alt(flexband_safeguarded, min_len=12):
     """
     Findet konstante SoC-Zeiträume.
     
@@ -225,7 +225,7 @@ def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=12):
                 # Zeitraum ist zwischen min_len und 2*min_len
                 result.append({
                     "start": start+1,
-                    "end": i-1,
+                    "end": i+1,
                     "soc": soc_liste[start],
                     "länge": zeitraum_laenge
                 })
@@ -267,6 +267,192 @@ def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=12):
     df_zeiträume_csv.to_csv(csv_path, index=False, sep=';')
 
     return result, csv_path
+
+def finde_flexible_arbitrage_zeiträume(flexband_safeguarded, fahrplan_json, min_len, soc_toleranz, max_aktivität_prozent):
+    """
+    Findet flexible Arbitrage-Zeiträume basierend auf SoC-Stabilität und niedriger Aktivität.
+    
+    Args:
+        flexband_safeguarded: Pfad zur JSON-Datei mit Flexibilitätsband
+        fahrplan_json: Pfad zur JSON-Datei mit Fahrplan
+        min_len: Minimale Länge eines Zeitraums (Standard: 4 = 1 Stunde)
+        soc_toleranz: Erlaubte SoC-Variation in kWh (Standard: 2.0 kWh)
+        max_aktivität_prozent: Maximale Fahrplan-Aktivität in % der Peak-Last (Standard: 15%)
+    
+    Returns:
+        Liste von Zeiträumen und CSV Dateipfad
+    """
+    # Daten laden
+    with open(flexband_safeguarded, "r", encoding="utf-8") as f:
+        flexband_data = json.load(f)
+    with open(fahrplan_json, "r", encoding="utf-8") as f:
+        fahrplan_data = json.load(f)
+    with open("user_inputs.json", "r", encoding="utf-8") as f:
+        user_inputs_data = json.load(f)
+    
+    soc_liste = [fb['soc'] for fb in flexband_data]
+    fahrplan_werte = [fp['value'] for fp in fahrplan_data]
+    soc_toleranz_kwh = user_inputs_data["capacity_kWh"] * (soc_toleranz / 100)
+
+    # Maximale Fahrplan-Aktivität bestimmen
+    max_fahrplan_wert = max(abs(fp) for fp in fahrplan_werte)
+    aktivitäts_schwelle = max_fahrplan_wert * (max_aktivität_prozent / 100)
+    
+    # Schutz vor Division durch Null
+    if aktivitäts_schwelle == 0:
+        aktivitäts_schwelle = 0.1  # Minimaler Wert um Division durch Null zu vermeiden
+    
+    result = []
+    n = len(soc_liste)
+    i = 0
+    zeitraum_id = 1
+    
+    print(f"🔍 Suche Arbitrage-Zeiträume mit SoC-Toleranz: ±{soc_toleranz_kwh} kWh, Max-Aktivität: {max_aktivität_prozent}% ({aktivitäts_schwelle:.1f} kW)")
+    
+    # Warnung wenn Fahrplan komplett inaktiv ist
+    if max_fahrplan_wert == 0:
+        print("⚠️  Warnung: Fahrplan hat keine Aktivität (alle Werte sind 0). Verwende nur SoC-basierte Kriterien.")
+    
+    while i < n:
+        start = i
+        start_soc = soc_liste[start]
+        
+        # Erweitere Zeitraum solange Kriterien erfüllt sind
+        while i + 1 < n:
+            next_soc = soc_liste[i + 1]
+            next_aktivität = abs(fahrplan_werte[i + 1])
+            
+            # Prüfe SoC-Toleranz UND Aktivitäts-Schwelle
+            soc_ok = abs(next_soc - start_soc) <= soc_toleranz_kwh
+            aktivität_ok = next_aktivität <= aktivitäts_schwelle
+            
+            # Wenn eines der Kriterien erfüllt ist, erweitere den Zeitraum
+            if soc_ok or aktivität_ok:
+                i += 1
+            else:
+                break
+        
+        zeitraum_laenge = i - start + 1
+        
+        # Prüfe Mindestlänge
+        if zeitraum_laenge >= min_len:
+            # Berechne durchschnittliche Werte für den Zeitraum
+            avg_soc = sum(soc_liste[start:i+1]) / zeitraum_laenge
+            max_soc_variation = max(soc_liste[start:i+1]) - min(soc_liste[start:i+1])
+            avg_aktivität = sum(abs(wert) for wert in fahrplan_werte[start:i+1]) / zeitraum_laenge
+            max_aktivität = max(abs(wert) for wert in fahrplan_werte[start:i+1])
+            
+            # Qualitätsbewertung des Zeitraums
+            soc_stabilität = max(0, 1 - (max_soc_variation / max(soc_toleranz_kwh * 2, 0.1)))  # 0-1, Schutz vor Division durch Null
+            aktivitäts_ruhe = max(0, 1 - (avg_aktivität / max(aktivitäts_schwelle, 0.1)))    # 0-1, Schutz vor Division durch Null
+            qualität_score = (soc_stabilität + aktivitäts_ruhe) / 2
+            
+            # Teile sehr lange Zeiträume auf (maximal 48 Intervalle = 12 Stunden)
+            max_chunk_size = 48
+            
+            if zeitraum_laenge <= max_chunk_size:
+                result.append({
+                    "zeitraum_id": zeitraum_id,
+                    "start": start + 1,  # 1-basiert für Kompatibilität
+                    "end": i + 1,        # 1-basiert für Kompatibilität  
+                    "soc": round(avg_soc, 2),
+                    "länge": zeitraum_laenge,
+                    "länge_stunden": round(zeitraum_laenge * 0.25, 2),
+                    "soc_variation": round(max_soc_variation, 2),
+                    "avg_aktivität": round(avg_aktivität, 2),
+                    "max_aktivität": round(max_aktivität, 2),
+                    "qualität_score": round(qualität_score, 3),
+                    "typ": "soc_stabil" if soc_stabilität > aktivitäts_ruhe else "niedrig_aktiv"
+                })
+                zeitraum_id += 1
+            else:
+                # Große Zeiträume in Chunks aufteilen
+                current_start = start
+                while current_start <= i:
+                    current_end = min(current_start + max_chunk_size - 1, i)
+                    chunk_länge = current_end - current_start + 1
+                    
+                    if chunk_länge >= min_len:
+                        chunk_avg_soc = sum(soc_liste[current_start:current_end+1]) / chunk_länge
+                        chunk_soc_var = max(soc_liste[current_start:current_end+1]) - min(soc_liste[current_start:current_end+1])
+                        chunk_avg_aktivität = sum(abs(wert) for wert in fahrplan_werte[current_start:current_end+1]) / chunk_länge
+                        chunk_max_aktivität = max(abs(wert) for wert in fahrplan_werte[current_start:current_end+1])
+                        
+                        chunk_soc_stabilität = max(0, 1 - (chunk_soc_var / max(soc_toleranz * 2, 0.1)))  # Schutz vor Division durch Null
+                        chunk_aktivitäts_ruhe = max(0, 1 - (chunk_avg_aktivität / max(aktivitäts_schwelle, 0.1)))  # Schutz vor Division durch Null
+                        chunk_qualität = (chunk_soc_stabilität + chunk_aktivitäts_ruhe) / 2
+                        
+                        result.append({
+                            "zeitraum_id": zeitraum_id,
+                            "start": current_start + 1,
+                            "end": current_end + 1,
+                            "soc": round(chunk_avg_soc, 2),
+                            "länge": chunk_länge,
+                            "länge_stunden": round(chunk_länge * 0.25, 2),
+                            "soc_variation": round(chunk_soc_var, 2),
+                            "avg_aktivität": round(chunk_avg_aktivität, 2),
+                            "max_aktivität": round(chunk_max_aktivität, 2),
+                            "qualität_score": round(chunk_qualität, 3),
+                            "typ": "soc_stabil" if chunk_soc_stabilität > chunk_aktivitäts_ruhe else "niedrig_aktiv"
+                        })
+                        zeitraum_id += 1
+                    
+                    current_start = current_end + 1
+        
+        i += 1
+    
+    # Nach Qualität sortieren (beste zuerst)
+    result.sort(key=lambda x: x["qualität_score"], reverse=True)
+    
+    print(f"✅ {len(result)} flexible Arbitrage-Zeiträume gefunden")
+    print(f"📊 Qualitätsverteilung: Hoch (>0.7): {sum(1 for r in result if r['qualität_score'] > 0.7)}, Mittel (0.5-0.7): {sum(1 for r in result if 0.5 <= r['qualität_score'] <= 0.7)}, Niedrig (<0.5): {sum(1 for r in result if r['qualität_score'] < 0.5)}")
+    
+    # Als JSON speichern
+    with open("flexible_arbitrage_zeiträume.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    
+    # Als CSV speichern
+    if result:
+        df_zeiträume = pd.DataFrame(result)
+        df_zeiträume_csv = df_zeiträume.copy()
+        
+        # Deutsche CSV-Formatierung
+        for col in ['soc', 'länge_stunden', 'soc_variation', 'avg_aktivität', 'max_aktivität', 'qualität_score']:
+            if col in df_zeiträume_csv.columns:
+                df_zeiträume_csv[col] = df_zeiträume_csv[col].map(lambda x: f"{x:.3f}".replace('.', ','))
+        
+        os.makedirs("csv", exist_ok=True)
+        csv_path = os.path.join("csv", "flexible_arbitrage_zeiträume.csv")
+        df_zeiträume_csv.to_csv(csv_path, index=False, sep=';')
+    else:
+        csv_path = None
+    
+    return result, csv_path
+
+# Kompatibilitäts-Wrapper für bestehenden Code
+def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=4):
+    """
+    Kompatibilitäts-Wrapper für die neue flexible Zeitraum-Erkennung.
+    """
+    print("⚠️  Verwende neue flexible Arbitrage-Zeitraum-Erkennung statt strenger SoC-Konstanz")
+    
+    # Lade Fahrplan für flexible Erkennung
+    fahrplan_path = "fahrplan.json"
+    if not os.path.exists(fahrplan_path):
+        # Fallback auf alte Methode wenn Fahrplan nicht verfügbar
+        print("❌ Fahrplan nicht verfügbar, verwende alte Methode")
+        return finde_konstante_soc_zeiträume_alt(flexband_safeguarded, min_len)
+    
+    result, csv_path = finde_flexible_arbitrage_zeiträume(
+        flexband_safeguarded, 
+        fahrplan_path, 
+        min_len=min_len,
+        soc_toleranz=3.0,  # Erhöhte Toleranz für mehr Zeiträume
+        max_aktivität_prozent=20  # 20% Aktivitätsschwelle
+    )
+    
+    return result, csv_path
+
 
 def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_json, user_inputs_json):
     """
