@@ -14,6 +14,15 @@ capacity = st.number_input("1. Kapazität des Batteriespeichers (kWh, Nameplate)
 # 2. Leistung des Batteriespeichers (kW)
 power = st.number_input("2. Leistung des Batteriespeichers (kW, Nameplate)", min_value=0.0, step=1.0, value=1000.0, format="%.2f")
 
+# Template Download Button
+with open("template_load_profile.csv", "rb") as f:
+    st.download_button(
+        label="📄 Template Lastprofil CSV herunterladen",
+        data=f,
+        file_name="template_load_profile.csv",
+        mime="text/csv"
+    )
+
 # 3. Lastgang (CSV Upload)
 lastgang_file = st.file_uploader("4. Lastgang des Industriekunden im 15-Minuten Intervall in kW (CSV)", type=["csv"])
 
