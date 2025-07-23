@@ -339,24 +339,28 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
             strategie_typen = ["Einfach", "Aggressiv", "Entlade-Lade"]
             strategie_typ = strategie_typen[strategie_idx] if strategie_idx < len(strategie_typen) else f"Typ-{strategie_idx + 1}"
             
-            strategie_info = {
-                "strategie_id": globale_strategie_id,
-                "zeitraum_id": zeitraum_idx + 1,
-                "strategie_typ": strategie_typ,
-                "start_index": zeitraum["start"],
-                "end_index": zeitraum["end"],
-                "länge_stunden": len(strategie) * 0.25,
-                "basis_soc": basis_soc,
-                "max_soc_erreicht": max([s["soc"] for s in strategie]),
-                "min_soc_erreicht": min([s["soc"] for s in strategie]),
-                "gesamte_lademenge": sum([s["aktion"] for s in strategie if s["aktion"] > 0]) / 4,
-                "gesamte_entlademenge": abs(sum([s["aktion"] for s in strategie if s["aktion"] < 0])) / 4,
-                "profit_euro": round(profit, 2),
-                "strategie_details": strategie
-            }
-            
-            strategien_liste.append(strategie_info)
-            globale_strategie_id += 1  # ID für nächste Strategie erhöhen
+            # Nur profitable Strategien (Profit > 0) hinzufügen
+            if profit > 0:
+                strategie_info = {
+                    "strategie_id": globale_strategie_id,
+                    "zeitraum_id": zeitraum_idx + 1,
+                    "strategie_typ": strategie_typ,
+                    "start_index": zeitraum["start"],
+                    "end_index": zeitraum["end"],
+                    "länge_stunden": len(strategie) * 0.25,
+                    "basis_soc": basis_soc,
+                    "max_soc_erreicht": max([s["soc"] for s in strategie]),
+                    "min_soc_erreicht": min([s["soc"] for s in strategie]),
+                    "gesamte_lademenge": sum([s["aktion"] for s in strategie if s["aktion"] > 0]) / 4,
+                    "gesamte_entlademenge": abs(sum([s["aktion"] for s in strategie if s["aktion"] < 0])) / 4,
+                    "profit_euro": round(profit, 2),
+                    "strategie_details": strategie
+                }
+                
+                strategien_liste.append(strategie_info)
+                globale_strategie_id += 1
+            else:
+                debug_info["strategien_verworfen"] += 1  # Tracking verworfener Strategien
     
     # Nach Profit sortieren (höchster zuerst)
     strategien_liste.sort(key=lambda x: x["profit_euro"], reverse=True)
