@@ -631,9 +631,11 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, preise_laden, pre
     n = len(flexband)
     strategie = []
     aktueller_soc = basis_soc
-    
+    end_soc = flexband[n-1]["soc"]
+
+
     # Bestimme Anzahl der Lade- und Entladephasen
-    anzahl_phasen = min(n // 2, 6)  # Maximal 6 Phasen pro Zeitraum
+    anzahl_phasen = min(n // 2, 8)  # Maximal 8 Phasen pro Zeitraum
     
     lade_indices = [idx for idx, preis in preise_laden[:anzahl_phasen]]
     entlade_indices = [idx for idx, preis in preise_entladen[:anzahl_phasen]]
@@ -672,7 +674,7 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, preise_laden, pre
         aktueller_soc = neuer_soc
     
     # Prüfen ob Bilanz ausgeglichen ist (SoC am Ende = SoC am Anfang)
-    soc_differenz = aktueller_soc - basis_soc
+    soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:  # Erhöhte Toleranz von 1.0 kWh
         # Versuche Bilanz durch Anpassung der letzten Aktionen zu korrigieren
         strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity)
@@ -688,6 +690,7 @@ def aggressive_strategie(flexband, preise_zeitraum, preise_laden, preise_entlade
     n = len(flexband)
     strategie = []
     aktueller_soc = basis_soc
+    end_soc = flexband[n-1]["soc"]
     
     anzahl_phasen = min(n // 2, 10)  # Mehr Phasen
     
@@ -723,7 +726,7 @@ def aggressive_strategie(flexband, preise_zeitraum, preise_laden, preise_entlade
         
         aktueller_soc = neuer_soc
     
-    soc_differenz = aktueller_soc - basis_soc
+    soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:  # Erhöhte Toleranz von 1.0 kWh
         # Versuche Bilanz durch Anpassung der letzten Aktionen zu korrigieren
         strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity)
@@ -739,6 +742,7 @@ def entlade_lade_strategie(flexband, preise_zeitraum, preise_laden, preise_entla
     n = len(flexband)
     strategie = []
     aktueller_soc = basis_soc
+    end_soc = flexband[n-1]["soc"]
     
     # Zeitraum in zwei Hälften teilen
     mitte = n // 2
@@ -793,7 +797,7 @@ def entlade_lade_strategie(flexband, preise_zeitraum, preise_laden, preise_entla
         aktueller_soc = neuer_soc
     
     # Bilanz-Korrektur: Falls zu viel entladen wurde, in den letzten Ladephasen nachkorrigieren
-    soc_differenz = aktueller_soc - basis_soc
+    soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:
         # Spezielle Korrektur für Entlade-Lade-Strategie
         strategie = korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, min_soc, basis_soc, capacity, mitte)
