@@ -268,16 +268,17 @@ def finde_konstante_soc_zeiträume_alt(flexband_safeguarded, min_len=12):
 
     return result, csv_path
 
-def finde_flexible_arbitrage_zeiträume(flexband_safeguarded, fahrplan_json, min_len, soc_toleranz, max_aktivität_prozent):
+def finde_flexible_arbitrage_zeiträume(flexband_safeguarded, fahrplan_json, min_len, soc_toleranz, max_aktivität_prozent, max_stunden=12):
     """
     Findet flexible Arbitrage-Zeiträume basierend auf SoC-Stabilität und niedriger Aktivität.
     
     Args:
         flexband_safeguarded: Pfad zur JSON-Datei mit Flexibilitätsband
         fahrplan_json: Pfad zur JSON-Datei mit Fahrplan
-        min_len: Minimale Länge eines Zeitraums (Standard: 4 = 1 Stunde)
-        soc_toleranz: Erlaubte SoC-Variation in kWh (Standard: 2.0 kWh)
-        max_aktivität_prozent: Maximale Fahrplan-Aktivität in % der Peak-Last (Standard: 15%)
+        min_len: Minimale Länge eines Zeitraums (in 15min-Intervallen)
+        soc_toleranz: Erlaubte SoC-Variation in % der Kapazität
+        max_aktivität_prozent: Maximale Fahrplan-Aktivität in % der Peak-Last
+        max_stunden: Maximale Länge eines Zeitraums in Stunden (Standard: 12)
     
     Returns:
         Liste von Zeiträumen und CSV Dateipfad
@@ -347,8 +348,8 @@ def finde_flexible_arbitrage_zeiträume(flexband_safeguarded, fahrplan_json, min
             aktivitäts_ruhe = max(0, 1 - (avg_aktivität / max(aktivitäts_schwelle, 0.1)))    # 0-1, Schutz vor Division durch Null
             qualität_score = (soc_stabilität + aktivitäts_ruhe) / 2
             
-            # Teile sehr lange Zeiträume auf (maximal 48 Intervalle = 12 Stunden)
-            max_chunk_size = 48
+            # Teile sehr lange Zeiträume auf (maximal konfigurierbare Stunden)
+            max_chunk_size = int(max_stunden * 4)  # Stunden zu 15min-Intervallen
             
             if zeitraum_laenge <= max_chunk_size:
                 result.append({
@@ -447,8 +448,9 @@ def finde_konstante_soc_zeiträume(flexband_safeguarded, min_len=4):
         flexband_safeguarded, 
         fahrplan_path, 
         min_len=min_len,
-        soc_toleranz=3.0,  # Erhöhte Toleranz für mehr Zeiträume
-        max_aktivität_prozent=20  # 20% Aktivitätsschwelle
+        soc_toleranz=20,  # 20% SoC-Toleranz
+        max_aktivität_prozent=20,  # 20% Aktivitätsschwelle
+        max_stunden=12  # 12 Stunden maximale Zeitraum-Länge
     )
     
     return result, csv_path

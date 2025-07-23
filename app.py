@@ -232,12 +232,13 @@ if os.path.exists("flexband_safeguarded.json") and os.path.exists("fahrplan.json
     
     # Erweiterte Konfiguration
     with st.expander("⚙️ Erweiterte Einstellungen für Arbitrage-Zeiträume"):
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             min_länge = st.slider("Mindestlänge (Stunden)", 0.5, 6.0, 1.0, 0.25)
+            max_zeitraum_länge = st.slider("Max. Zeitraum-Länge (Stunden)", 1.0, 24.0, 12.0, 1.0)
+            st.caption("📝 Längere Zeiträume werden automatisch in kleinere Chunks aufgeteilt")
         with col2:
             soc_toleranz = st.slider("SoC Toleranz (%)", 5, 95, 20, 5)
-        with col3:
             max_aktivität = st.slider("Max. Aktivität (%)", 5, 95, 20, 5)
     
     if st.button("🔍 Flexible Arbitrage-Zeiträume suchen"):
@@ -249,7 +250,8 @@ if os.path.exists("flexband_safeguarded.json") and os.path.exists("fahrplan.json
                 "fahrplan.json", 
                 min_len=min_len_intervalle,
                 soc_toleranz=soc_toleranz,
-                max_aktivität_prozent=max_aktivität
+                max_aktivität_prozent=max_aktivität,
+                max_stunden=max_zeitraum_länge
             )
             
             # Hauptstatistiken
