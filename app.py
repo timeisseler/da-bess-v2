@@ -344,7 +344,7 @@ if (os.path.exists("strategien.json") and
     os.path.exists("user_inputs.json")):
     
     try:
-        implementierter_fahrplan, fahrplan_csv, kpis = implementiere_strategien(
+        implementierter_fahrplan, fahrplan_csv, kpis, implementierte_strategien_detail, strategien_detail_csv = implementiere_strategien(
             "strategien.json",
             "fahrplan.json", 
             "user_inputs.json"
@@ -392,6 +392,7 @@ if (os.path.exists("strategien.json") and
             )
             
         st.success("✅ Strategien erfolgreich in den Fahrplan implementiert!")
+        
         # Strategietypen-Verteilung
         if kpis['strategietypen']:
             st.subheader("📊 Strategietypen-Verteilung")
@@ -405,16 +406,69 @@ if (os.path.exists("strategien.json") and
         st.subheader("📋 Implementierter Fahrplan (Vorschau)")
         st.dataframe(pd.DataFrame(implementierter_fahrplan).head(10))
         
-        # Download-Button
-        with open(fahrplan_csv, "rb") as f:
-            st.download_button(
-                label="📥 Implementierten Fahrplan als CSV herunterladen",
-                data=f,
-                file_name="implementierter_fahrplan.csv",
-                mime="text/csv"
-            )
+        # Download-Buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            with open(fahrplan_csv, "rb") as f:
+                st.download_button(
+                    label="📥 Implementierten Fahrplan als CSV herunterladen",
+                    data=f,
+                    file_name="implementierter_fahrplan.csv",
+                    mime="text/csv"
+                )
+        with col2:
+            if strategien_detail_csv:
+                with open(strategien_detail_csv, "rb") as f:
+                    st.download_button(
+                        label="📊 Detaillierte Strategien als CSV herunterladen",
+                        data=f,
+                        file_name="implementierte_strategien_detail.csv",
+                        mime="text/csv"
+                    )
         
-
+        # Detaillierte Strategien-Analyse
+        if implementierte_strategien_detail:
+            st.subheader("🔍 Detaillierte Strategien-Implementierung")
+            
+            # Top 5 Strategien nach Profit anzeigen
+            for i, strategie in enumerate(implementierte_strategien_detail[:5]):
+                with st.expander(f"📋 Strategie {strategie['strategie_id']} - {strategie['strategie_typ']} (Profit: {strategie['profit_euro']:.2f} €)"):
+                    
+                    # Strategien-Info
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("💰 Profit", f"{strategie['profit_euro']:.2f} €")
+                        st.metric("🏷️ Typ", strategie['strategie_typ'])
+                    with col2:
+                        st.metric("⏱️ Länge", f"{strategie['länge_stunden']:.2f} h")
+                        st.metric("📊 Basis SoC", f"{strategie['basis_soc']:.2f} kWh")
+                    with col3:
+                        st.metric("🔼 Reihenfolge", f"#{strategie['implementierungs_reihenfolge']}")
+                        st.metric("🎯 Zeitraum ID", strategie['zeitraum_id'])
+                    
+                    # Strategien-Schritte in Tabelle
+                    if strategie['implementierte_schritte']:
+                        st.write("**Implementierte Schritte:**")
+                        schritte_df = pd.DataFrame(strategie['implementierte_schritte'])
+                        
+                        # Nur wichtige Spalten für Anzeige auswählen
+                        display_columns = ['timestamp', 'aktion_typ', 'strategie_aktion', 'da_preis_ct_kwh', 'energie_kwh', 'kosten_erlös_euro']
+                        if all(col in schritte_df.columns for col in display_columns):
+                            display_df = schritte_df[display_columns].copy()
+                            display_df.columns = ['Zeitpunkt', 'Aktion', 'Leistung (kW)', 'DA-Preis (ct/kWh)', 'Energie (kWh)', 'Kosten/Erlös (€)']
+                            st.dataframe(display_df, use_container_width=True)
+                        else:
+                            st.dataframe(schritte_df, use_container_width=True)
+                    
+                    # Strategie-Zusammenfassung
+                    total_energie = sum(step['energie_kwh'] for step in strategie['implementierte_schritte'])
+                    total_kosten_erlös = sum(step['kosten_erlös_euro'] for step in strategie['implementierte_schritte'])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("⚡ Gesamte Energie", f"{total_energie:.2f} kWh")
+                    with col2:
+                        st.metric("💰 Gesamt Kosten/Erlös", f"{total_kosten_erlös:.2f} €")
         
     except Exception as e:
         st.error(f"❌ Fehler beim Implementieren der Strategien: {e}")

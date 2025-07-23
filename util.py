@@ -762,87 +762,173 @@ def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
         user_inputs_json: Pfad zur JSON-Datei mit Nutzereingaben
     
     Returns:
-        neuer_fahrplan, csv_path, kpis
+        neuer_fahrplan, csv_path, kpis, implementierte_strategien_detail, strategien_detail_csv_path
     """
-    # Daten laden
-    with open(strategien_json, "r", encoding="utf-8") as f:
-        strategien = json.load(f)
-    with open(fahrplan_json, "r", encoding="utf-8") as f:
-        fahrplan = json.load(f)
-    with open(user_inputs_json, "r", encoding="utf-8") as f:
-        user_inputs = json.load(f)
-    
-    capacity = user_inputs["capacity_kWh"]
-    daily_cycles = user_inputs["daily_cycles"]
-    # Bisherige Zyklen aus dem Fahrplan berechnen
-    bisherige_belademenge = 0.0
-    for eintrag in fahrplan:
-        if eintrag["value"] > 0:  # Nur positive Werte (Beladen) zählen
-            bisherige_belademenge += eintrag["value"] * 0.25  # kW * 0.25h = kWh
-    
-    bisherige_zyklen = bisherige_belademenge / capacity
-    max_belademenge = (daily_cycles * 365 - bisherige_zyklen) * capacity  # Verbleibende Jahresgrenze
-    if max_belademenge < 0:
-        max_belademenge = 0  # Keine weiteren Zyklen erlaubt
-    # Neuen Fahrplan als Kopie des ursprünglichen erstellen
-    neuer_fahrplan = [{"index": fp["index"], 
-                      "timestamp": fp["timestamp"], 
-                      "value": fp["value"]} for fp in fahrplan]
-    
-    # Tracking-Variablen
-    gesamt_belademenge = 0.0
-    implementierte_strategien = []
-    verwendete_zeiträume = set()
-    
-    # Strategien nach Profit sortiert durchgehen (höchster zuerst)
-    for strategie in strategien:
-        start_idx = strategie["start_index"] - 1  # 0-basiert
-        end_idx = strategie["end_index"] - 1      # 0-basiert
+    try:
+        # Daten laden
+        with open(strategien_json, "r", encoding="utf-8") as f:
+            strategien = json.load(f)
+        with open(fahrplan_json, "r", encoding="utf-8") as f:
+            fahrplan = json.load(f)
+        with open(user_inputs_json, "r", encoding="utf-8") as f:
+            user_inputs = json.load(f)
         
-        # Prüfen ob Zeitraum bereits belegt ist
-        zeitraum_range = set(range(start_idx, end_idx + 1))
-        if zeitraum_range.intersection(verwendete_zeiträume):
-            continue  # Zeitraum überschneidet sich, Strategie überspringen
+        # DA-Preise laden für detailliertes Tracking
+        try:
+            with open("da-prices.json", "r", encoding="utf-8") as f:
+                da_prices = json.load(f)
+        except FileNotFoundError:
+            print("Warning: da-prices.json nicht gefunden, verwende Fallback")
+            da_prices = [{"value": 0.0} for _ in range(len(fahrplan))]
+        except Exception as e:
+            print(f"Fehler beim Laden der DA-Preise: {e}")
+            da_prices = [{"value": 0.0} for _ in range(len(fahrplan))]
+
+        capacity = user_inputs["capacity_kWh"]
+        daily_cycles = user_inputs["daily_cycles"]
+        # Bisherige Zyklen aus dem Fahrplan berechnen
+        bisherige_belademenge = 0.0
+        for eintrag in fahrplan:
+            if eintrag["value"] > 0:  # Nur positive Werte (Beladen) zählen
+                bisherige_belademenge += eintrag["value"] * 0.25  # kW * 0.25h = kWh
         
-        # Belademenge dieser Strategie berechnen
-        strategie_belademenge = strategie["gesamte_lademenge"]
+        bisherige_zyklen = bisherige_belademenge / capacity
+        max_belademenge = (daily_cycles * 365 - bisherige_zyklen) * capacity  # Verbleibende Jahresgrenze
+        if max_belademenge < 0:
+            max_belademenge = 0  # Keine weiteren Zyklen erlaubt
+        # Neuen Fahrplan als Kopie des ursprünglichen erstellen
+        neuer_fahrplan = [{"index": fp["index"], 
+                          "timestamp": fp["timestamp"], 
+                          "value": fp["value"]} for fp in fahrplan]
         
-        # Prüfen ob Kapazitätsgrenze überschritten würde
-        if gesamt_belademenge + strategie_belademenge > max_belademenge:
-            break  # Stoppen, da Kapazitätsgrenze erreicht
+        # Tracking-Variablen
+        gesamt_belademenge = 0.0
+        implementierte_strategien = []
+        implementierte_strategien_detail = []  # Für detailliertes Tracking
+        verwendete_zeiträume = set()
         
-        # Strategie implementieren
-        for detail in strategie["strategie_details"]:
-            idx = detail["index"] 
-            if 0 <= idx < len(neuer_fahrplan):
-                neuer_fahrplan[idx]["value"] += detail["aktion"]
-                neuer_fahrplan[idx]["value"] = round(neuer_fahrplan[idx]["value"], 2)
+        # Strategien nach Profit sortiert durchgehen (höchster zuerst)
+        for strategie in strategien:
+            start_idx = strategie["start_index"] - 1  # 0-basiert
+            end_idx = strategie["end_index"] - 1      # 0-basiert
+            
+            # Prüfen ob Zeitraum bereits belegt ist
+            zeitraum_range = set(range(start_idx, end_idx + 1))
+            if zeitraum_range.intersection(verwendete_zeiträume):
+                continue  # Zeitraum überschneidet sich, Strategie überspringen
+            
+            # Belademenge dieser Strategie berechnen
+            strategie_belademenge = strategie["gesamte_lademenge"]
+            
+            # Prüfen ob Kapazitätsgrenze überschritten würde
+            if gesamt_belademenge + strategie_belademenge > max_belademenge:
+                break  # Stoppen, da Kapazitätsgrenze erreicht
+            
+            # Strategie implementieren mit detailliertem Tracking
+            implementierte_schritte = []
+            for detail in strategie["strategie_details"]:
+                idx = detail["index"] 
+                if 0 <= idx < len(neuer_fahrplan):
+                    # Originaler Fahrplan-Wert vor Änderung
+                    original_value = neuer_fahrplan[idx]["value"]
+                    
+                    # Strategie-Aktion hinzufügen
+                    neuer_fahrplan[idx]["value"] += detail["aktion"]
+                    neuer_fahrplan[idx]["value"] = round(neuer_fahrplan[idx]["value"], 2)
+                    
+                    # Detaillierte Informationen für diesen Schritt sammeln
+                    step_info = {
+                        "index": detail["index"],
+                        "timestamp": detail["timestamp"],
+                        "original_fahrplan": round(original_value, 2),
+                        "strategie_aktion": round(detail["aktion"], 2),
+                        "neuer_fahrplan": round(neuer_fahrplan[idx]["value"], 2),
+                        "soc": detail["soc"],
+                        "da_preis_ct_kwh": round(da_prices[idx]["value"], 4) if idx < len(da_prices) else 0.0,
+                        "energie_kwh": round(abs(detail["aktion"]) * 0.25, 4),
+                        "kosten_erlös_euro": round(abs(detail["aktion"]) * 0.25 * da_prices[idx]["value"], 4) if idx < len(da_prices) else 0.0,
+                        "aktion_typ": "Beladung" if detail["aktion"] > 0 else ("Entladung" if detail["aktion"] < 0 else "Keine Aktion")
+                    }
+                    implementierte_schritte.append(step_info)
+            
+            # Detaillierte Strategieinfo zusammenstellen
+            strategie_detail = {
+                "strategie_id": strategie["strategie_id"],
+                "zeitraum_id": strategie["zeitraum_id"],
+                "strategie_typ": strategie["strategie_typ"],
+                "start_index": strategie["start_index"],
+                "end_index": strategie["end_index"],
+                "länge_stunden": strategie["länge_stunden"],
+                "basis_soc": strategie["basis_soc"],
+                "profit_euro": strategie["profit_euro"],
+                "gesamte_lademenge": strategie["gesamte_lademenge"],
+                "gesamte_entlademenge": strategie["gesamte_entlademenge"],
+                "implementierte_schritte": implementierte_schritte,
+                "implementierungs_reihenfolge": len(implementierte_strategien) + 1
+            }
+            
+            # Tracking aktualisieren
+            gesamt_belademenge += strategie_belademenge
+            implementierte_strategien.append(strategie)
+            implementierte_strategien_detail.append(strategie_detail)
+            verwendete_zeiträume.update(zeitraum_range)
         
-        # Tracking aktualisieren
-        gesamt_belademenge += strategie_belademenge
-        implementierte_strategien.append(strategie)
-        verwendete_zeiträume.update(zeitraum_range)
-    
-    # SoC für neuen Fahrplan berechnen
-    neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity)
-    
-    # KPIs berechnen
-    kpis = berechne_fahrplan_kpis(neuer_fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity)
-    
-    # Als JSON speichern
-    with open("implementierter_fahrplan.json", "w", encoding="utf-8") as f:
-        json.dump(neuer_fahrplan_mit_soc, f, ensure_ascii=False, indent=2)
-    
-    # Als CSV speichern
-    df_fahrplan = pd.DataFrame(neuer_fahrplan_mit_soc)
-    df_fahrplan_csv = df_fahrplan.copy()
-    df_fahrplan_csv['value'] = df_fahrplan_csv['value'].map(lambda x: f"{x:.2f}".replace('.', ','))
-    df_fahrplan_csv['soc'] = df_fahrplan_csv['soc'].map(lambda x: f"{x:.2f}".replace('.', ','))
-    os.makedirs("csv", exist_ok=True)
-    csv_path = os.path.join("csv", "implementierter_fahrplan.csv")
-    df_fahrplan_csv.to_csv(csv_path, index=False, sep=';')
-    
-    return neuer_fahrplan_mit_soc, csv_path, kpis
+        # SoC für neuen Fahrplan berechnen
+        neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity)
+        
+        # KPIs berechnen
+        kpis = berechne_fahrplan_kpis(neuer_fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity)
+        
+        # Als JSON speichern
+        with open("implementierter_fahrplan.json", "w", encoding="utf-8") as f:
+            json.dump(neuer_fahrplan_mit_soc, f, ensure_ascii=False, indent=2)
+        
+        # Detaillierte Strategien-Implementierung als JSON speichern
+        with open("implementierte_strategien_detail.json", "w", encoding="utf-8") as f:
+            json.dump(implementierte_strategien_detail, f, ensure_ascii=False, indent=2)
+        
+        # Als CSV speichern
+        df_fahrplan = pd.DataFrame(neuer_fahrplan_mit_soc)
+        df_fahrplan_csv = df_fahrplan.copy()
+        df_fahrplan_csv['value'] = df_fahrplan_csv['value'].map(lambda x: f"{x:.2f}".replace('.', ','))
+        df_fahrplan_csv['soc'] = df_fahrplan_csv['soc'].map(lambda x: f"{x:.2f}".replace('.', ','))
+        os.makedirs("csv", exist_ok=True)
+        csv_path = os.path.join("csv", "implementierter_fahrplan.csv")
+        df_fahrplan_csv.to_csv(csv_path, index=False, sep=';')
+        
+        # Detaillierte Strategien-Schritte als CSV speichern
+        strategien_schritte_flat = []
+        for strategie_detail in implementierte_strategien_detail:
+            for schritt in strategie_detail["implementierte_schritte"]:
+                row = {
+                    "strategie_id": strategie_detail["strategie_id"],
+                    "zeitraum_id": strategie_detail["zeitraum_id"],
+                    "strategie_typ": strategie_detail["strategie_typ"],
+                    "implementierungs_reihenfolge": strategie_detail["implementierungs_reihenfolge"],
+                    "profit_euro": strategie_detail["profit_euro"],
+                    **schritt  # Alle Schritt-Details hinzufügen
+                }
+                strategien_schritte_flat.append(row)
+        
+        if strategien_schritte_flat:
+            df_strategien = pd.DataFrame(strategien_schritte_flat)
+            df_strategien_csv = df_strategien.copy()
+            # Deutsche CSV-Formatierung
+            for col in ['original_fahrplan', 'strategie_aktion', 'neuer_fahrplan', 'soc', 'da_preis_ct_kwh', 'energie_kwh', 'kosten_erlös_euro']:
+                if col in df_strategien_csv.columns:
+                    df_strategien_csv[col] = df_strategien_csv[col].map(lambda x: f"{x:.4f}".replace('.', ','))
+            
+            strategien_detail_csv_path = os.path.join("csv", "implementierte_strategien_detail.csv")
+            df_strategien_csv.to_csv(strategien_detail_csv_path, index=False, sep=';')
+        else:
+            strategien_detail_csv_path = None
+        
+        return neuer_fahrplan_mit_soc, csv_path, kpis, implementierte_strategien_detail, strategien_detail_csv_path
+
+    except Exception as e:
+        print(f"Fehler in implementiere_strategien: {e}")
+        # Return default values to maintain compatibility
+        return [], "", {}, [], None
 
 def berechne_soc_fahrplan(fahrplan, capacity):
     """
