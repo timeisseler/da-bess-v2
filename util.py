@@ -479,6 +479,10 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
     with open(user_inputs_json, "r", encoding="utf-8") as f:
         user_inputs = json.load(f)
     
+    # Ursprünglichen Fahrplan laden (wichtig für SoC-Berechnungen!)
+    with open("fahrplan.json", "r", encoding="utf-8") as f:
+        original_fahrplan = json.load(f)
+    
     # Lastgang nach Fahrplan laden
     with open("lastgang_nach_fahrplan.json", "r", encoding="utf-8") as f:
         lastgang_nach_fahrplan = json.load(f)
@@ -505,12 +509,13 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
         # Relevante Daten für diesen Zeitraum extrahieren
         zeitraum_flexband = flexband[start_idx:end_idx+1]
         zeitraum_preise = da_prices[start_idx:end_idx+1]
+        zeitraum_fahrplan = original_fahrplan[start_idx:end_idx+1]  # Ursprünglicher Fahrplan!
         
-        # Basis SoC des Zeitraums
-        basis_soc = zeitraum["soc"]
+        # Echter Start-SoC des Flexbands (nicht Durchschnitt!)
+        basis_soc = zeitraum_flexband[0]["soc"]
         
-        # Verschiedene Strategien generieren
-        strategien = generiere_strategien(zeitraum_flexband, zeitraum_preise, basis_soc, min_soc, max_soc)
+        # Verschiedene Strategien generieren (mit ursprünglichem Fahrplan!)
+        strategien = generiere_strategien(zeitraum_flexband, zeitraum_preise, zeitraum_fahrplan, basis_soc, min_soc, max_soc, capacity)
         
         if not strategien:
             debug_info["keine_strategien_generiert"] += 1
@@ -586,10 +591,12 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
     
     return strategien_liste, csv_path
 
-def generiere_strategien(flexband_zeitraum, preise_zeitraum, basis_soc, min_soc, capacity):
+def generiere_strategien(flexband_zeitraum, preise_zeitraum, fahrplan_zeitraum, basis_soc, min_soc, max_soc, capacity):
     """
     Generiert verschiedene Be- und Entladestrategien für einen Zeitraum.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
+
     strategien = []
     n = len(flexband_zeitraum)
     
@@ -608,33 +615,33 @@ def generiere_strategien(flexband_zeitraum, preise_zeitraum, basis_soc, min_soc,
     
     # Strategie 1: Einfache Lade-Entlade-Strategie (50% der Zeit laden, 50% entladen)
     if n >= 4:  # Mindestens 1 Stunde
-        strategie1 = einfache_lade_entlade_strategie(flexband_zeitraum, preise_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, capacity)
+        strategie1 = einfache_lade_entlade_strategie(flexband_zeitraum, preise_zeitraum, fahrplan_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, max_soc, capacity)
         if strategie1:
             strategien.append(strategie1)
     
     # Strategie 2: Aggressive Strategie (mehr Zyklen, wenn möglich)
     if n >= 8:  # Mindestens 2 Stunden
-        strategie2 = aggressive_strategie(flexband_zeitraum, preise_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, capacity)
+        strategie2 = aggressive_strategie(flexband_zeitraum, preise_zeitraum, fahrplan_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, max_soc, capacity)
         if strategie2:
             strategien.append(strategie2)
     
     # Strategie 3: Entlade-Lade-Strategie (erst entladen, dann beladen)
     if n >= 4:  # Mindestens 1 Stunde
-        strategie3 = entlade_lade_strategie(flexband_zeitraum, preise_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, capacity)
+        strategie3 = entlade_lade_strategie(flexband_zeitraum, preise_zeitraum, fahrplan_zeitraum, preise_sortiert_laden, preise_sortiert_entladen, basis_soc, min_soc, max_soc, capacity)
         if strategie3:
             strategien.append(strategie3)
     
     return strategien
 
-def einfache_lade_entlade_strategie(flexband, preise_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, capacity):
+def einfache_lade_entlade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, max_soc, capacity):
     """
     Einfache Strategie: Laden bei günstigen Preisen, Entladen bei teuren Preisen.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
     n = len(flexband)
     strategie = []
     aktueller_soc = basis_soc
     end_soc = flexband[n-1]["soc"]
-
 
     # Bestimme Anzahl der Lade- und Entladephasen
     anzahl_phasen = min(n // 2, 8)  # Maximal 8 Phasen pro Zeitraum
@@ -650,20 +657,23 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, preise_laden, pre
         
         if i in lade_indices:
             # Laden, aber SoC-Limits beachten
-            max_ladung = min(charge_pot, (capacity - aktueller_soc) * 4)  # *4 wegen 15min Intervall
+            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4)  # *4 wegen 15min Intervall
             aktion = max_ladung * 0.8  # 80% des Potentials nutzen
         elif i in entlade_indices:
             # Entladen, aber SoC-Limits beachten
             max_entladung = min(abs(discharge_pot), (aktueller_soc - min_soc) * 4)
             aktion = -max_entladung * 0.8  # 80% des Potentials nutzen
         
-        # SoC aktualisieren
-        neuer_soc = round(aktueller_soc + (aktion / 4), 2)
+        # SoC aktualisieren: Strategie-Aktion + ursprüngliche Fahrplan-Aktion
+        original_aktion = fahrplan_zeitraum[i]["value"]
+        gesamt_aktion = aktion + original_aktion  # Kombinierte Aktion
+        neuer_soc = round(aktueller_soc + (gesamt_aktion / 4), 2)
         
         # Sicherheitsprüfung
-        if neuer_soc < min_soc or neuer_soc > capacity:
+        if neuer_soc < min_soc or neuer_soc > max_soc:
             aktion = 0
-            neuer_soc = aktueller_soc
+            # Neu berechnen ohne Strategie-Aktion
+            neuer_soc = round(aktueller_soc + (original_aktion / 4), 2)
         
         strategie.append({
             "index": flexband[i]["index"],
@@ -679,15 +689,16 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, preise_laden, pre
     soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:  # Erhöhte Toleranz von 1.0 kWh
         # Versuche Bilanz durch Anpassung der letzten Aktionen zu korrigieren
-        strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity)
+        strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum, min_soc, max_soc, capacity)
         if not strategie:
             return None  # Strategie nicht korrigierbar
     
     return strategie
 
-def aggressive_strategie(flexband, preise_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, capacity):
+def aggressive_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, max_soc, capacity):
     """
     Aggressive Strategie: Mehr Zyklen, höhere Nutzung der Potentiale.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
     n = len(flexband)
     strategie = []
@@ -706,17 +717,21 @@ def aggressive_strategie(flexband, preise_zeitraum, preise_laden, preise_entlade
         aktion = 0
         
         if i in lade_indices:
-            max_ladung = min(charge_pot, (capacity - aktueller_soc) * 4)
+            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4)
             aktion = max_ladung * 0.95  # 95% des Potentials nutzen
         elif i in entlade_indices:
             max_entladung = min(abs(discharge_pot), (aktueller_soc - min_soc) * 4)
             aktion = -max_entladung * 0.95
         
-        neuer_soc = round(aktueller_soc + (aktion / 4), 2)
+        # SoC aktualisieren: Strategie-Aktion + ursprüngliche Fahrplan-Aktion
+        original_aktion = fahrplan_zeitraum[i]["value"]
+        gesamt_aktion = aktion + original_aktion  # Kombinierte Aktion
+        neuer_soc = round(aktueller_soc + (gesamt_aktion / 4), 2)
         
-        if neuer_soc < min_soc or neuer_soc > capacity:
+        if neuer_soc < min_soc or neuer_soc > max_soc:
             aktion = 0
-            neuer_soc = aktueller_soc
+            # Neu berechnen ohne Strategie-Aktion
+            neuer_soc = round(aktueller_soc + (original_aktion / 4), 2)
         
         strategie.append({
             "index": flexband[i]["index"],
@@ -731,21 +746,22 @@ def aggressive_strategie(flexband, preise_zeitraum, preise_laden, preise_entlade
     soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:  # Erhöhte Toleranz von 1.0 kWh
         # Versuche Bilanz durch Anpassung der letzten Aktionen zu korrigieren
-        strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity)
+        strategie = korrigiere_soc_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum, min_soc, max_soc, capacity)
         if not strategie:
             return None  # Strategie nicht korrigierbar
     
         return strategie
 
-def entlade_lade_strategie(flexband, preise_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, capacity):
+def entlade_lade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_laden, preise_entladen, basis_soc, min_soc, max_soc, capacity):
     """
     Entlade-Lade-Strategie: Erst bei hohen Preisen entladen, dann bei niedrigen Preisen laden.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
     n = len(flexband)
     strategie = []
     aktueller_soc = basis_soc
     end_soc = flexband[n-1]["soc"]
-    
+
     # Zeitraum in zwei Hälften teilen
     mitte = n // 2
     
@@ -776,17 +792,20 @@ def entlade_lade_strategie(flexband, preise_zeitraum, preise_laden, preise_entla
         elif i >= mitte and i in lade_indices:
             # Zweite Hälfte: Laden, aber nicht mehr als entladen wurde
             verblibende_ladung = gesamt_entladung - gesamt_ladung
-            max_ladung = min(charge_pot, (capacity - aktueller_soc) * 4, verblibende_ladung)
+            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4, verblibende_ladung)
             aktion = max_ladung * 0.7  # 70% des Potentials nutzen
             gesamt_ladung += aktion
         
-        # SoC aktualisieren
-        neuer_soc = round(aktueller_soc + (aktion / 4), 2)
+        # SoC aktualisieren: Strategie-Aktion + ursprüngliche Fahrplan-Aktion
+        original_aktion = fahrplan_zeitraum[i]["value"]
+        gesamt_aktion = aktion + original_aktion  # Kombinierte Aktion
+        neuer_soc = round(aktueller_soc + (gesamt_aktion / 4), 2)
         
         # Sicherheitsprüfung
-        if neuer_soc < min_soc or neuer_soc > capacity:
+        if neuer_soc < min_soc or neuer_soc > max_soc:
             aktion = 0
-            neuer_soc = aktueller_soc
+            # Neu berechnen ohne Strategie-Aktion
+            neuer_soc = round(aktueller_soc + (original_aktion / 4), 2)
         
         strategie.append({
             "index": flexband[i]["index"],
@@ -802,15 +821,16 @@ def entlade_lade_strategie(flexband, preise_zeitraum, preise_laden, preise_entla
     soc_differenz = aktueller_soc - end_soc
     if abs(soc_differenz) > 1.0:
         # Spezielle Korrektur für Entlade-Lade-Strategie
-        strategie = korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, min_soc, basis_soc, capacity, mitte)
+        strategie = korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum, min_soc, basis_soc, mitte, capacity)
         if not strategie:
             return None  # Strategie nicht korrigierbar
     
     return strategie
 
-def korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, min_soc, basis_soc, capacity, mitte):
+def korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum, min_soc, basis_soc, mitte, capacity):
     """
     Spezielle Bilanz-Korrektur für Entlade-Lade-Strategien.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
     if not strategie:
         return None
@@ -849,9 +869,12 @@ def korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, min_soc, 
         else:
             vorheriger_soc = korrigierte_strategie[i-1]["soc"]
         
-        neuer_soc = vorheriger_soc + (neue_aktion / 4)
+        # SoC berechnen: neue Strategie-Aktion + ursprüngliche Fahrplan-Aktion
+        original_aktion = fahrplan_zeitraum[i]["value"]
+        gesamt_aktion = neue_aktion + original_aktion
+        neuer_soc = vorheriger_soc + (gesamt_aktion / 4)
         
-        if neuer_soc < min_soc or neuer_soc > capacity:
+        if neuer_soc < min_soc or neuer_soc > (0.95 * capacity):
             return None
         
         # Anpassung durchführen
@@ -864,13 +887,14 @@ def korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, min_soc, 
     
     return korrigierte_strategie
 
-def korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity):
+def korrigiere_soc_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum, min_soc, max_soc, capacity):
     """
     Versucht die SoC-Bilanz einer Strategie zu korrigieren.
+    Berücksichtigt den ursprünglichen Fahrplan für korrekte SoC-Berechnungen.
     """
     if not strategie:
         return None
-    
+
     # Kopie der Strategie für Korrekturen
     korrigierte_strategie = strategie.copy()
     
@@ -901,9 +925,12 @@ def korrigiere_soc_bilanz(strategie, soc_differenz, flexband, min_soc, capacity)
         else:
             vorheriger_soc = korrigierte_strategie[i-1]["soc"]
         
-        neuer_soc = vorheriger_soc + (neue_aktion / 4)
+        # SoC berechnen: neue Strategie-Aktion + ursprüngliche Fahrplan-Aktion
+        original_aktion = fahrplan_zeitraum[i]["value"]
+        gesamt_aktion = neue_aktion + original_aktion
+        neuer_soc = vorheriger_soc + (gesamt_aktion / 4)
         
-        if neuer_soc < min_soc or neuer_soc > capacity:
+        if neuer_soc < min_soc or neuer_soc > max_soc:
             # SoC-Limits verletzt
             return None
         
@@ -964,6 +991,10 @@ def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
             fahrplan = json.load(f)
         with open(user_inputs_json, "r", encoding="utf-8") as f:
             user_inputs = json.load(f)
+        
+        # Flexband laden für korrekte SoC-Berechnung
+        with open("flexband_safeguarded.json", "r", encoding="utf-8") as f:
+            flexband = json.load(f)
         
         # DA-Preise laden für detailliertes Tracking
         try:
@@ -1065,8 +1096,8 @@ def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
             implementierte_strategien_detail.append(strategie_detail)
             verwendete_zeiträume.update(zeitraum_range)
         
-        # SoC für neuen Fahrplan berechnen
-        neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity)
+        # SoC für neuen Fahrplan berechnen (mit Flexband und verwendeten Zeiträumen)
+        neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity, flexband, verwendete_zeiträume)
         
         # KPIs berechnen
         kpis = berechne_fahrplan_kpis(neuer_fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity)
@@ -1122,18 +1153,35 @@ def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
         # Return default values to maintain compatibility
         return [], "", {}, [], None
 
-def berechne_soc_fahrplan(fahrplan, capacity):
+def berechne_soc_fahrplan(fahrplan, capacity, flexband=None, verwendete_zeiträume=None):
     """
     Berechnet den SoC-Verlauf für einen Fahrplan.
+    
+    Args:
+        fahrplan: Fahrplan mit implementierten Strategien
+        capacity: Batteriekapazität
+        flexband: Ursprüngliches Flexband (optional)
+        verwendete_zeiträume: Set der Indices mit implementierten Strategien (optional)
     """
     fahrplan_mit_soc = []
     soc = 0.3 * capacity  # Startwert: 30% der Kapazität
     
     for i, fp in enumerate(fahrplan):
-        # SoC aktualisieren basierend auf vorheriger Aktion
-        if i > 0:
-            soc += fahrplan[i-1]["value"] / 4  # 15min Intervall = /4
-            soc = max(0.05 * capacity, min(capacity, soc))  # Grenzen einhalten
+        # Für Zeitpunkte außerhalb der Strategien: SoC aus Flexband übernehmen
+        if flexband and verwendete_zeiträume and i not in verwendete_zeiträume:
+            # SoC direkt aus Flexband übernehmen (bereits korrekt berechnet)
+            if i < len(flexband):
+                soc = flexband[i]["soc"]
+            else:
+                # Fallback falls Flexband kürzer ist
+                if i > 0:
+                    soc += fahrplan[i-1]["value"] / 4
+                    soc = max(0.05 * capacity, min(0.95 * capacity, soc))
+        else:
+            # Für Strategiezeiträume: Normal berechnen
+            if i > 0:
+                soc += fahrplan[i-1]["value"] / 4  # 15min Intervall = /4
+                soc = max(0.05 * capacity, min(0.95 * capacity, soc))  # Grenzen einhalten
         
         fahrplan_mit_soc.append({
             "index": fp["index"],
