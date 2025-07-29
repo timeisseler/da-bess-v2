@@ -1,7 +1,7 @@
 {
-  "capacity_kWh": 4000.0,
+  "capacity_kWh": 2000.0,
   "power_kW": 2000.0,
   "avg_price_ct_kWh": 0.0896,
   "daily_cycles": 1,
-  "timestamp": "2025-07-29T13:18:26.283732"
+  "timestamp": "2025-07-29T13:55:11.257879"
 }

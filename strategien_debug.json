@@ -1,7 +1,7 @@
 {
-  "gesamt_zeiträume": 1191,
+  "gesamt_zeiträume": 1207,
   "zu_kurze_zeiträume": 0,
-  "keine_strategien_generiert": 480,
-  "strategien_verworfen": 524,
-  "erfolgreiche_strategien": 1094
+  "keine_strategien_generiert": 347,
+  "strategien_verworfen": 484,
+  "erfolgreiche_strategien": 1229
 }
