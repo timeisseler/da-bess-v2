@@ -1,45 +1,126 @@
 #!/usr/bin/env python3
 """
-Fixed implementation of strategy deployment with proper SoC tracking and validation.
-This version has reduced output to prevent Broken Pipe errors in Streamlit.
+Comprehensive fix for SoC calculation issues in battery optimization.
+This addresses the root causes:
+1. Original schedule already violates SoC limits
+2. Improper SoC tracking during strategy implementation
+3. Need for proper validation and safeguards
 """
 
 import json
 import os
 import pandas as pd
+import shutil
 from datetime import datetime
-import sys
 
 
-# Global flag to control verbose output
-VERBOSE_MODE = False
-SUMMARY_ONLY = True  # Only show summary information
+def fix_original_schedule_soc(fahrplan, capacity, initial_soc=0.3):
+    """
+    Fix the original schedule to ensure it respects SoC limits.
+    
+    Args:
+        fahrplan: Original schedule
+        capacity: Battery capacity in kWh
+        initial_soc: Initial SoC as fraction (0.3 = 30%)
+    
+    Returns:
+        Fixed schedule that respects SoC limits
+    """
+    MIN_SOC = 0.05 * capacity
+    MAX_SOC = 0.95 * capacity
+    
+    fixed_fahrplan = [fp.copy() for fp in fahrplan]
+    current_soc = initial_soc * capacity
+    modifications = 0
+    
+    print(f"\n🔧 Fixing original schedule to respect SoC limits...")
+    print(f"   Initial SoC: {current_soc:.1f} kWh")
+    
+    for i in range(len(fixed_fahrplan)):
+        # Check what the SoC would be after this action
+        next_soc = current_soc + fixed_fahrplan[i]["value"] / 4
+        
+        # If action would violate limits, adjust it
+        if next_soc < MIN_SOC:
+            # Would go too low - reduce discharge or increase charge
+            min_allowed_action = (MIN_SOC - current_soc) * 4
+            if fixed_fahrplan[i]["value"] < min_allowed_action:
+                old_value = fixed_fahrplan[i]["value"]
+                fixed_fahrplan[i]["value"] = round(min_allowed_action, 2)
+                modifications += 1
+                print(f"   Index {i}: Adjusted {old_value:.2f} → {fixed_fahrplan[i]['value']:.2f} kW (prevent low SoC)")
+        
+        elif next_soc > MAX_SOC:
+            # Would go too high - reduce charge or increase discharge
+            max_allowed_action = (MAX_SOC - current_soc) * 4
+            if fixed_fahrplan[i]["value"] > max_allowed_action:
+                old_value = fixed_fahrplan[i]["value"]
+                fixed_fahrplan[i]["value"] = round(max_allowed_action, 2)
+                modifications += 1
+                print(f"   Index {i}: Adjusted {old_value:.2f} → {fixed_fahrplan[i]['value']:.2f} kW (prevent high SoC)")
+        
+        # Update current SoC for next iteration
+        current_soc += fixed_fahrplan[i]["value"] / 4
+        current_soc = max(MIN_SOC, min(MAX_SOC, current_soc))
+    
+    print(f"   Total modifications: {modifications}")
+    
+    return fixed_fahrplan
 
-def log(message, force=False):
-    """Conditional logging to prevent Broken Pipe errors."""
-    if force or VERBOSE_MODE:
-        try:
-            print(message)
-            sys.stdout.flush()
-        except BrokenPipeError:
-            # Silently ignore broken pipe errors
-            pass
-        except Exception:
-            # Ignore any print errors
-            pass
+
+def recalculate_flexband(fixed_fahrplan, lastgang, capacity, power):
+    """
+    Recalculate flexibility band based on fixed schedule.
+    """
+    flexband = []
+    soc = 0.3 * capacity
+    
+    for i, fp in enumerate(fixed_fahrplan):
+        lg_value = lastgang[i]['value']
+        fp_value = fp['value']
+        
+        # Calculate SoC
+        if i > 0:
+            soc += fixed_fahrplan[i-1]['value'] / 4
+            soc = max(0.05 * capacity, min(0.95 * capacity, soc))
+        
+        # Calculate potentials
+        if fp_value < 0:
+            charge_potential = 0.0
+        elif fp_value == 0:
+            charge_potential = 0.95 * power
+        else:
+            charge_potential = 0.95 * power - fp_value
+        
+        if fp_value > 0:
+            discharge_potential = 0.0
+        elif fp_value == 0:
+            discharge_potential = -0.95 * power
+        else:
+            discharge_potential = -0.95 * power - fp_value
+        
+        # Apply peak constraint
+        peak = max(lg['value'] for lg in lastgang)
+        headroom = peak - lg_value
+        charge_potential = min(charge_potential, headroom)
+        discharge_potential = max(discharge_potential, -lg_value)
+        
+        flexband.append({
+            'index': fp['index'],
+            'timestamp': fp['timestamp'],
+            'charge_potential': round(charge_potential, 2),
+            'discharge_potential': round(discharge_potential, 2),
+            'soc': round(soc, 2)
+        })
+    
+    return flexband
 
 
 def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_inputs_json):
     """
-    Fixed implementation that properly tracks and validates SoC throughout strategy deployment.
-    This version has minimal output to prevent Broken Pipe errors in Streamlit.
-    
-    Returns:
-        neuer_fahrplan, csv_path, kpis, implementierte_strategien_detail, strategien_detail_csv_path
+    Comprehensive implementation that fixes original schedule first, then safely implements strategies.
     """
-    # Initial message
-    if SUMMARY_ONLY:
-        log("🔧 Implementing strategies with SoC validation...", force=True)
+    print("\n🚀 COMPREHENSIVE SOC FIX - Starting implementation...")
     
     # Load data
     with open(strategien_json, "r", encoding="utf-8") as f:
@@ -67,9 +148,14 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
     MAX_SOC = 0.95 * capacity
     INITIAL_SOC = 0.3 * capacity
     
-    log(f"📊 System: {capacity} kWh, {power} kW, SoC limits: {MIN_SOC:.1f}-{MAX_SOC:.1f} kWh")
+    print(f"\n📊 System Configuration:")
+    print(f"   Battery capacity: {capacity} kWh")
+    print(f"   Battery power: {power} kW")
+    print(f"   SoC limits: {MIN_SOC:.1f} - {MAX_SOC:.1f} kWh")
+    print(f"   Initial SoC: {INITIAL_SOC:.1f} kWh")
     
-    # Check original schedule
+    # Step 1: Check original schedule
+    print(f"\n📊 Checking original schedule...")
     test_soc = INITIAL_SOC
     min_orig_soc = test_soc
     max_orig_soc = test_soc
@@ -87,28 +173,54 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
         if i < len(original_fahrplan) - 1:
             test_soc += original_fahrplan[i]["value"] / 4
     
-    log(f"📊 Original schedule: {len(violations)} violations, SoC: {min_orig_soc:.1f}-{max_orig_soc:.1f} kWh")
-    
-    # Fix original schedule if needed
+    print(f"   Original SoC range: {min_orig_soc:.1f} - {max_orig_soc:.1f} kWh")
     if violations:
-        log("🔧 Fixing original schedule...")
-        fixed_fahrplan = fix_original_schedule_soc(original_fahrplan, capacity)
-    else:
-        fixed_fahrplan = original_fahrplan
+        print(f"   ⚠️  Found {len(violations)} violations in original schedule!")
+        for v in violations[:5]:
+            print(f"      {v}")
     
-    # Recalculate flexibility band
+    # Step 2: Fix original schedule
+    fixed_fahrplan = fix_original_schedule_soc(original_fahrplan, capacity)
+    
+    # Step 3: Verify fixed schedule
+    print(f"\n📊 Verifying fixed schedule...")
+    test_soc = INITIAL_SOC
+    min_fixed_soc = test_soc
+    max_fixed_soc = test_soc
+    
+    for i in range(len(fixed_fahrplan)):
+        min_fixed_soc = min(min_fixed_soc, test_soc)
+        max_fixed_soc = max(max_fixed_soc, test_soc)
+        if i < len(fixed_fahrplan) - 1:
+            test_soc += fixed_fahrplan[i]["value"] / 4
+    
+    print(f"   Fixed SoC range: {min_fixed_soc:.1f} - {max_fixed_soc:.1f} kWh")
+    
+    # Step 4: Recalculate flexibility band
+    print(f"\n📊 Recalculating flexibility band...")
     flexband = recalculate_flexband(fixed_fahrplan, lastgang, capacity, power)
     
-    # Calculate cycle capacity
+    # Step 5: Calculate cycle capacity
     bisherige_belademenge = sum(fp["value"] * 0.25 for fp in fixed_fahrplan if fp["value"] > 0)
     bisherige_zyklen = bisherige_belademenge / capacity
     max_belademenge = (daily_cycles * 365 - bisherige_zyklen) * capacity
     
-    # Create new schedule
+    print(f"   Existing cycles: {bisherige_zyklen:.2f}")
+    print(f"   Remaining capacity: {max_belademenge:.1f} kWh")
+    
+    # Step 6: Implement strategies with comprehensive validation
     neuer_fahrplan = [{"index": fp["index"], 
                       "timestamp": fp["timestamp"], 
                       "value": fp["value"],
                       "soc": 0.0} for fp in fixed_fahrplan]
+    
+    # Track SoC throughout entire schedule
+    soc_trajectory = []
+    current_soc = INITIAL_SOC
+    for i in range(len(neuer_fahrplan)):
+        soc_trajectory.append(current_soc)
+        if i < len(neuer_fahrplan) - 1:
+            current_soc += neuer_fahrplan[i]["value"] / 4
     
     # Process strategies
     implementierte_strategien = []
@@ -117,19 +229,9 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
     gesamt_belademenge = 0.0
     skipped_strategies = []
     
-    log(f"🔍 Processing {len(strategien)} strategies...")
-    
-    # Progress tracking
-    processed = 0
-    implemented = 0
+    print(f"\n🔍 Evaluating {len(strategien)} strategies...")
     
     for strategy_num, strategie in enumerate(strategien):
-        processed += 1
-        
-        # Show progress every 50 strategies
-        if processed % 50 == 0:
-            log(f"   Progress: {processed}/{len(strategien)} strategies processed, {implemented} implemented")
-        
         start_idx = strategie["start_index"] - 1
         end_idx = strategie["end_index"] - 1
         
@@ -145,7 +247,7 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
             skipped_strategies.append((strategie["strategie_id"], "Cycle limit"))
             break
         
-        # Validate SoC
+        # Comprehensive SoC validation
         test_schedule = [fp.copy() for fp in neuer_fahrplan]
         
         # Apply strategy to test schedule
@@ -161,7 +263,7 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
         max_test_soc = test_soc
         
         for i in range(len(test_schedule)):
-            if test_soc < MIN_SOC - 1 or test_soc > MAX_SOC + 1:
+            if test_soc < MIN_SOC - 1 or test_soc > MAX_SOC + 1:  # 1 kWh tolerance
                 soc_valid = False
                 break
             
@@ -175,7 +277,8 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
             soc_valid = False
         
         if not soc_valid:
-            skipped_strategies.append((strategie["strategie_id"], f"SoC: {min_test_soc:.1f}-{max_test_soc:.1f}"))
+            skipped_strategies.append((strategie["strategie_id"], 
+                f"SoC violation: {min_test_soc:.1f}-{max_test_soc:.1f}"))
             continue
         
         # Check flexibility band constraints
@@ -198,7 +301,9 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
             continue
         
         # IMPLEMENT THE STRATEGY
-        implemented += 1
+        print(f"\n  ✅ Implementing strategy {strategie['strategie_id']} ({strategie['strategie_typ']})")
+        print(f"     SoC range: {min_test_soc:.1f} - {max_test_soc:.1f} kWh")
+        print(f"     Profit: {strategie['profit_euro']:.2f} €")
         
         for detail in strategie["strategie_details"]:
             idx = detail["index"]
@@ -242,7 +347,8 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
         
         implementierte_strategien_detail.append(implementierungs_detail)
     
-    # Calculate final SoC values
+    # Step 7: Calculate final SoC values
+    print("\n📊 Calculating final SoC trajectory...")
     current_soc = INITIAL_SOC
     min_final_soc = current_soc
     max_final_soc = current_soc
@@ -254,15 +360,21 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
         
         if i < len(neuer_fahrplan) - 1:
             current_soc += fp["value"] / 4
-            current_soc = max(MIN_SOC, min(MAX_SOC, current_soc))
     
-    # Final validation
+    # Step 8: Final validation
     violations = []
     for i, fp in enumerate(neuer_fahrplan):
         if fp["soc"] < MIN_SOC:
             violations.append(f"Index {i}: SoC {fp['soc']:.1f} < {MIN_SOC:.1f}")
         elif fp["soc"] > MAX_SOC:
             violations.append(f"Index {i}: SoC {fp['soc']:.1f} > {MAX_SOC:.1f}")
+    
+    if violations:
+        print(f"\n⚠️  WARNING: {len(violations)} SoC violations remain!")
+        for v in violations[:5]:
+            print(f"    {v}")
+    else:
+        print(f"\n✅ All SoC values within limits: {min_final_soc:.1f} - {max_final_soc:.1f} kWh")
     
     # Calculate KPIs
     anzahl_zyklen = sum(fp["value"] * 0.25 for fp in neuer_fahrplan if fp["value"] > 0) / capacity
@@ -287,12 +399,18 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
         "original_schedule_fixed": min_orig_soc < MIN_SOC or max_orig_soc > MAX_SOC
     }
     
-    # Final summary
-    log(f"\n✅ Implementation complete:", force=True)
-    log(f"   Strategies: {len(implementierte_strategien)} implemented, {len(skipped_strategies)} skipped", force=True)
-    log(f"   Profit: €{gesamt_profit:.2f}", force=True)
-    log(f"   SoC range: {min_final_soc:.1f} - {max_final_soc:.1f} kWh", force=True)
-    log(f"   Violations: {len(violations)}", force=True)
+    print(f"\n📊 Implementation Summary:")
+    print(f"   Original schedule fixed: {'Yes' if kpis['original_schedule_fixed'] else 'No'}")
+    print(f"   Strategies implemented: {len(implementierte_strategien)}")
+    print(f"   Strategies skipped: {len(skipped_strategies)}")
+    print(f"   Total profit: {gesamt_profit:.2f} €")
+    print(f"   Final SoC range: {min_final_soc:.1f} - {max_final_soc:.1f} kWh")
+    print(f"   Total cycles: {anzahl_zyklen:.2f}")
+    
+    if skipped_strategies[:10]:
+        print(f"\n📋 Sample of skipped strategies:")
+        for sid, reason in skipped_strategies[:10]:
+            print(f"   Strategy {sid}: {reason}")
     
     # Save results
     output_dir = "comprehensive_fix_output"
@@ -344,7 +462,7 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
     else:
         detail_csv_path = None
     
-    # Save report
+    # Save comprehensive report
     report = {
         "timestamp": datetime.now().isoformat(),
         "configuration": {
@@ -378,106 +496,13 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
     with open(os.path.join(output_dir, "comprehensive_fix_report.json"), "w") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     
+    print(f"\n✅ Comprehensive fix completed successfully!")
+    print(f"   Results saved to: {output_dir}/")
+    print(f"   Main schedule updated: implementierter_fahrplan.json")
+    
     return neuer_fahrplan, csv_path, kpis, implementierte_strategien_detail, detail_csv_path
 
 
-def fix_original_schedule_soc(fahrplan, capacity, initial_soc=0.3):
-    """Fix the original schedule to ensure it respects SoC limits."""
-    MIN_SOC = 0.05 * capacity
-    MAX_SOC = 0.95 * capacity
-    
-    fixed_fahrplan = [fp.copy() for fp in fahrplan]
-    current_soc = initial_soc * capacity
-    modifications = 0
-    
-    for i in range(len(fixed_fahrplan)):
-        next_soc = current_soc + fixed_fahrplan[i]["value"] / 4
-        
-        if next_soc < MIN_SOC:
-            min_allowed_action = (MIN_SOC - current_soc) * 4
-            if fixed_fahrplan[i]["value"] < min_allowed_action:
-                fixed_fahrplan[i]["value"] = round(min_allowed_action, 2)
-                modifications += 1
-        
-        elif next_soc > MAX_SOC:
-            max_allowed_action = (MAX_SOC - current_soc) * 4
-            if fixed_fahrplan[i]["value"] > max_allowed_action:
-                fixed_fahrplan[i]["value"] = round(max_allowed_action, 2)
-                modifications += 1
-        
-        current_soc += fixed_fahrplan[i]["value"] / 4
-        current_soc = max(MIN_SOC, min(MAX_SOC, current_soc))
-    
-    log(f"   Fixed {modifications} actions in original schedule")
-    
-    return fixed_fahrplan
-
-
-def recalculate_flexband(fixed_fahrplan, lastgang, capacity, power):
-    """Recalculate flexibility band based on fixed schedule."""
-    flexband = []
-    soc = 0.3 * capacity
-    
-    for i, fp in enumerate(fixed_fahrplan):
-        lg_value = lastgang[i]['value']
-        fp_value = fp['value']
-        
-        if i > 0:
-            soc += fixed_fahrplan[i-1]['value'] / 4
-            soc = max(0.05 * capacity, min(0.95 * capacity, soc))
-        
-        # Calculate potentials
-        if fp_value < 0:
-            charge_potential = 0.0
-        elif fp_value == 0:
-            charge_potential = 0.95 * power
-        else:
-            charge_potential = 0.95 * power - fp_value
-        
-        if fp_value > 0:
-            discharge_potential = 0.0
-        elif fp_value == 0:
-            discharge_potential = -0.95 * power
-        else:
-            discharge_potential = -0.95 * power - fp_value
-        
-        # Apply peak constraint
-        peak = max(lg['value'] for lg in lastgang)
-        headroom = peak - lg_value
-        charge_potential = min(charge_potential, headroom)
-        discharge_potential = max(discharge_potential, -lg_value)
-        
-        flexband.append({
-            'index': fp['index'],
-            'timestamp': fp['timestamp'],
-            'charge_potential': round(charge_potential, 2),
-            'discharge_potential': round(discharge_potential, 2),
-            'soc': round(soc, 2)
-        })
-    
-    return flexband
-
-
-# For standalone testing
-if __name__ == "__main__":
-    import sys
-    
-    # Enable verbose mode for standalone testing
-    VERBOSE_MODE = True
-    SUMMARY_ONLY = False
-    
-    print("🚀 Testing quiet implementation...")
-    
-    try:
-        result = implementiere_strategien_comprehensive(
-            "strategien.json",
-            "fahrplan.json",
-            "user_inputs.json"
-        )
-        print("\n✅ Test completed successfully!")
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        sys.exit(1)
 def apply_comprehensive_fix_to_util():
     """
     Replace the implementiere_strategien function in util.py with the comprehensive fix.

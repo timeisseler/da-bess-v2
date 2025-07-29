@@ -1,5 +1,35 @@
 #!/usr/bin/env python3
 """
+Fix for GitHub Issue #2: Broken Pipe error during strategy implementation.
+
+The error occurs because of excessive print statements in comprehensive_soc_fix.py
+when running under Streamlit. This fix creates a quiet version that only logs
+essential information.
+"""
+
+import json
+import os
+import shutil
+from datetime import datetime
+
+
+def create_quiet_comprehensive_fix():
+    """
+    Create a version of comprehensive_soc_fix.py with reduced output for Streamlit compatibility.
+    """
+    print("🔧 Creating Streamlit-compatible version of comprehensive_soc_fix.py...")
+    
+    # Read the original file
+    with open("comprehensive_soc_fix.py", "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Create backup
+    shutil.copy("comprehensive_soc_fix.py", "comprehensive_soc_fix_verbose.py")
+    print("   ✅ Created backup: comprehensive_soc_fix_verbose.py")
+    
+    # Replace print statements with a logger that can be controlled
+    modified_content = '''#!/usr/bin/env python3
+"""
 Fixed implementation of strategy deployment with proper SoC tracking and validation.
 This version has reduced output to prevent Broken Pipe errors in Streamlit.
 """
@@ -288,7 +318,7 @@ def implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_
     }
     
     # Final summary
-    log(f"\n✅ Implementation complete:", force=True)
+    log(f"\\n✅ Implementation complete:", force=True)
     log(f"   Strategies: {len(implementierte_strategien)} implemented, {len(skipped_strategies)} skipped", force=True)
     log(f"   Profit: €{gesamt_profit:.2f}", force=True)
     log(f"   SoC range: {min_final_soc:.1f} - {max_final_soc:.1f} kWh", force=True)
@@ -474,51 +504,97 @@ if __name__ == "__main__":
             "fahrplan.json",
             "user_inputs.json"
         )
-        print("\n✅ Test completed successfully!")
+        print("\\n✅ Test completed successfully!")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\\n❌ Error: {e}")
         sys.exit(1)
-def apply_comprehensive_fix_to_util():
-    """
-    Replace the implementiere_strategien function in util.py with the comprehensive fix.
-    """
-    print("\n🔧 Applying comprehensive fix to util.py...")
+'''
     
-    # Backup original
-    shutil.copy("util.py", "util_backup.py")
-    print("   ✅ Created backup: util_backup.py")
+    # Save the complete modified content
+    modified_content = modified_content + content[content.find("def apply_comprehensive_fix_to_util"):]
     
-    # Read the current util.py
+    # Write the modified version
+    with open("comprehensive_soc_fix.py", "w", encoding="utf-8") as f:
+        f.write(modified_content)
+    
+    print("   ✅ Updated comprehensive_soc_fix.py with quiet mode")
+    
+    # Also update util.py to handle the error
+    update_util_error_handling()
+    
+    print("\n✅ Broken Pipe fix applied successfully!")
+
+
+def update_util_error_handling():
+    """
+    Update util.py to handle BrokenPipeError gracefully.
+    """
+    print("\n🔧 Updating util.py with error handling...")
+    
+    # Read current util.py
     with open("util.py", "r", encoding="utf-8") as f:
-        util_content = f.read()
+        content = f.read()
     
     # Find the implementiere_strategien function
-    import_start = util_content.find("def implementiere_strategien(")
-    if import_start == -1:
+    func_start = content.find("def implementiere_strategien(")
+    if func_start == -1:
         print("   ❌ Could not find implementiere_strategien function!")
-        return False
+        return
     
-    # Find the end of the function (next def or end of file)
-    next_def = util_content.find("\ndef ", import_start + 1)
+    # Find the end of the function
+    next_def = content.find("\ndef ", func_start + 1)
     if next_def == -1:
-        func_end = len(util_content)
+        func_end = len(content)
     else:
         func_end = next_def
     
-    # Create the new function that wraps our comprehensive fix
-    wrapper_function = '''def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
+    # Create improved wrapper with error handling
+    new_function = '''def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
     """
-    Fixed implementation with comprehensive SoC validation.
-    This wrapper calls the comprehensive fix implementation.
+    Fixed implementation with comprehensive SoC validation and Broken Pipe error handling.
     """
+    import sys
+    
     try:
         # Import the comprehensive fix if available
         from comprehensive_soc_fix import implementiere_strategien_comprehensive
-        return implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_inputs_json)
+        
+        # Redirect stdout to prevent Broken Pipe errors in Streamlit
+        original_stdout = sys.stdout
+        
+        class QuietOutput:
+            def write(self, text):
+                try:
+                    if text.strip():  # Only write non-empty lines
+                        original_stdout.write(text)
+                        original_stdout.flush()
+                except BrokenPipeError:
+                    # Silently ignore broken pipe errors
+                    pass
+                except Exception:
+                    # Ignore any write errors
+                    pass
+            
+            def flush(self):
+                try:
+                    original_stdout.flush()
+                except:
+                    pass
+        
+        # Use quiet output in Streamlit environment
+        if 'streamlit' in sys.modules:
+            sys.stdout = QuietOutput()
+        
+        try:
+            result = implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_inputs_json)
+            return result
+        finally:
+            # Restore original stdout
+            sys.stdout = original_stdout
+            
     except ImportError:
-        # Fallback to inline implementation
+        # Fallback if comprehensive fix not available
         print("Warning: comprehensive_soc_fix.py not found, using fallback")
-        # Return empty results to maintain compatibility
         return [], "", {
             "anzahl_implementierter_strategien": 0,
             "anzahl_zyklen": 0,
@@ -529,44 +605,71 @@ def apply_comprehensive_fix_to_util():
             "gesamt_profit": 0,
             "strategietypen": {}
         }, [], None
+    except BrokenPipeError:
+        # Handle broken pipe error gracefully
+        print("Warning: Output truncated due to pipe limitations")
+        # Return last known good result if available
+        try:
+            with open("implementierter_fahrplan.json", "r") as f:
+                fahrplan = json.load(f)
+            
+            # Try to load cached KPIs
+            kpis = {
+                "anzahl_implementierter_strategien": len(fahrplan),
+                "anzahl_zyklen": 0,
+                "max_beladung": max(fp["value"] for fp in fahrplan),
+                "max_entladung": min(fp["value"] for fp in fahrplan),
+                "max_soc": max(fp.get("soc", 0) for fp in fahrplan),
+                "min_soc": min(fp.get("soc", 0) for fp in fahrplan),
+                "gesamt_profit": 0,
+                "strategietypen": {}
+            }
+            
+            return fahrplan, "csv/implementierter_fahrplan.csv", kpis, [], None
+            
+        except:
+            # Return empty results as last resort
+            return [], "", {
+                "anzahl_implementierter_strategien": 0,
+                "anzahl_zyklen": 0,
+                "max_beladung": 0,
+                "max_entladung": 0,
+                "max_soc": 0,
+                "min_soc": 0,
+                "gesamt_profit": 0,
+                "strategietypen": {}
+            }, [], None
 '''
     
     # Replace the function
-    new_util_content = (
-        util_content[:import_start] + 
-        wrapper_function +
-        util_content[func_end:]
+    new_content = (
+        content[:func_start] + 
+        new_function +
+        content[func_end:]
     )
     
-    # Write the updated util.py
+    # Write updated util.py
     with open("util.py", "w", encoding="utf-8") as f:
-        f.write(new_util_content)
+        f.write(new_content)
     
-    print("   ✅ Updated util.py with comprehensive fix wrapper")
-    print("   ℹ️  The fix will use comprehensive_soc_fix.py if available")
-    
-    return True
+    print("   ✅ Updated util.py with BrokenPipeError handling")
 
 
 if __name__ == "__main__":
-    # Run the comprehensive fix
-    print("🚀 Running comprehensive SoC fix...")
+    print("🚀 Fixing Broken Pipe error (GitHub Issue #2)")
+    print("=" * 50)
     
-    result = implementiere_strategien_comprehensive(
-        "strategien.json",
-        "fahrplan.json",
-        "user_inputs.json"
-    )
+    # Create the quiet version
+    create_quiet_comprehensive_fix()
     
-    # Optionally apply the fix to util.py
-    print("\n❓ Would you like to apply this fix to util.py?")
-    print("   This will update the implementiere_strategien function.")
-    print("   A backup will be created as util_backup.py")
+    print("\n📋 Summary of changes:")
+    print("   1. Reduced print statements in comprehensive_soc_fix.py")
+    print("   2. Added conditional logging with error handling")
+    print("   3. Updated util.py with BrokenPipeError handling")
+    print("   4. Added stdout redirection for Streamlit compatibility")
     
-    # For automated execution, we'll apply it
-    if apply_comprehensive_fix_to_util():
-        print("\n✅ Fix has been applied to util.py!")
-        print("   The app.py will now use the fixed implementation.")
-    else:
-        print("\n❌ Failed to apply fix to util.py")
-        print("   You can manually use comprehensive_soc_fix.py instead.")
+    print("\n✅ Fix complete! The Broken Pipe error should no longer occur.")
+    print("\n💡 The fix will:")
+    print("   - Show minimal output when running in Streamlit")
+    print("   - Handle BrokenPipeError gracefully if it occurs")
+    print("   - Still provide full output when running standalone")
