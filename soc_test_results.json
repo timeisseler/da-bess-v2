@@ -1,0 +1,411 @@
+{
+  "capacity": 4000.0,
+  "limits": {
+    "min": 200.0,
+    "max": 3800.0
+  },
+  "original_violations": 665,
+  "implemented_violations": 4107,
+  "violations_detail": [
+    {
+      "index": 305,
+      "timestamp": "2025-01-04 04:15",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 306,
+      "timestamp": "2025-01-04 04:30",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 307,
+      "timestamp": "2025-01-04 04:45",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 308,
+      "timestamp": "2025-01-04 05:00",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 309,
+      "timestamp": "2025-01-04 05:15",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 310,
+      "timestamp": "2025-01-04 05:30",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 311,
+      "timestamp": "2025-01-04 05:45",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 312,
+      "timestamp": "2025-01-04 06:00",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 313,
+      "timestamp": "2025-01-04 06:15",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 314,
+      "timestamp": "2025-01-04 06:30",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 315,
+      "timestamp": "2025-01-04 06:45",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 316,
+      "timestamp": "2025-01-04 07:00",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 317,
+      "timestamp": "2025-01-04 07:15",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 318,
+      "timestamp": "2025-01-04 07:30",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 319,
+      "timestamp": "2025-01-04 07:45",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 320,
+      "timestamp": "2025-01-04 08:00",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 321,
+      "timestamp": "2025-01-04 08:15",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 322,
+      "timestamp": "2025-01-04 08:30",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 323,
+      "timestamp": "2025-01-04 08:45",
+      "soc": 3800.014999999999,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.014999999998963176
+    },
+    {
+      "index": 2260,
+      "timestamp": "2025-01-24 13:00",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2261,
+      "timestamp": "2025-01-24 13:15",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2262,
+      "timestamp": "2025-01-24 13:30",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2263,
+      "timestamp": "2025-01-24 13:45",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2264,
+      "timestamp": "2025-01-24 14:00",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2265,
+      "timestamp": "2025-01-24 14:15",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2266,
+      "timestamp": "2025-01-24 14:30",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2267,
+      "timestamp": "2025-01-24 14:45",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2268,
+      "timestamp": "2025-01-24 15:00",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2269,
+      "timestamp": "2025-01-24 15:15",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2270,
+      "timestamp": "2025-01-24 15:30",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2271,
+      "timestamp": "2025-01-24 15:45",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2272,
+      "timestamp": "2025-01-24 16:00",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2273,
+      "timestamp": "2025-01-24 16:15",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2274,
+      "timestamp": "2025-01-24 16:30",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2275,
+      "timestamp": "2025-01-24 16:45",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2276,
+      "timestamp": "2025-01-24 17:00",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2277,
+      "timestamp": "2025-01-24 17:15",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2278,
+      "timestamp": "2025-01-24 17:30",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2279,
+      "timestamp": "2025-01-24 17:45",
+      "soc": 3800.004999999994,
+      "type": "above_max",
+      "limit": 3800.0,
+      "difference": 0.004999999994197424
+    },
+    {
+      "index": 2959,
+      "timestamp": "2025-01-31 19:45",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2960,
+      "timestamp": "2025-01-31 20:00",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2961,
+      "timestamp": "2025-01-31 20:15",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2962,
+      "timestamp": "2025-01-31 20:30",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2963,
+      "timestamp": "2025-01-31 20:45",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2964,
+      "timestamp": "2025-01-31 21:00",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2965,
+      "timestamp": "2025-01-31 21:15",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2966,
+      "timestamp": "2025-01-31 21:30",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2967,
+      "timestamp": "2025-01-31 21:45",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2968,
+      "timestamp": "2025-01-31 22:00",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    },
+    {
+      "index": 2969,
+      "timestamp": "2025-01-31 22:15",
+      "soc": 199.99250000000063,
+      "type": "below_min",
+      "limit": 200.0,
+      "difference": 0.007499999999367901
+    }
+  ]
+}

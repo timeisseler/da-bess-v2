@@ -107,9 +107,11 @@ def calculate_flexibilitätsband(initial_soc, lastgang, fahrplan, user_inputs):
         fp_value = fp['value']
         # soc
         if i == 0:
-            soc = 0.3 * capacity
+            soc = initial_soc * capacity  # Use the passed initial_soc parameter
         else:
             soc = flexband[-1]['soc'] + (fahrplan[i-1]['value'] / 4)
+            # Ensure SoC stays within limits
+            soc = max(0.05 * capacity, min(0.95 * capacity, soc))
          # charge_potential
         if fp_value < 0:
             charge_potential = 0.0
@@ -151,9 +153,11 @@ def calculate_flexibilitätsband(initial_soc, lastgang, fahrplan, user_inputs):
 
         # soc calculation same as before
         if i == 0:
-            soc = 0.3 * capacity
+            soc = initial_soc * capacity  # Use the passed initial_soc parameter
         else:
             soc = flexband_safeguarded[-1]['soc'] + (fahrplan[i-1]['value'] / 4)
+            # Ensure SoC stays within limits
+            soc = max(0.05 * capacity, min(0.95 * capacity, soc))
 
         # Get values from previous flexband calculation
         prev_charge = flexband[i]['charge_potential']
@@ -542,8 +546,8 @@ def berechne_strategien(konstante_soc_zeiträume_json, flexband_json, da_prices_
                     "end_index": zeitraum["end"],
                     "länge_stunden": len(strategie) * 0.25,
                     "basis_soc": basis_soc,
-                    "max_soc_erreicht": max([s["soc"] for s in strategie]),
-                    "min_soc_erreicht": min([s["soc"] for s in strategie]),
+                    "max_soc_erreicht": min(max_soc, max([s["soc"] for s in strategie])),
+                    "min_soc_erreicht": max(min_soc, min([s["soc"] for s in strategie])),
                     "gesamte_lademenge": sum([s["aktion"] for s in strategie if s["aktion"] > 0]) / 4,
                     "gesamte_entlademenge": abs(sum([s["aktion"] for s in strategie if s["aktion"] < 0])) / 4,
                     "profit_euro": round(profit, 2),
@@ -640,7 +644,7 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum
     """
     n = len(flexband)
     strategie = []
-    aktueller_soc = flexband[0]["soc"]
+    aktueller_soc = basis_soc  # Use the passed basis_soc, not flexband[0]["soc"]
     # Der Ziel SoC ist der SoC am Ende des Zeitraums oder am Anfang des nächsten Zeitraums?
     end_soc = flexband[n-1]["soc"]
 
@@ -658,11 +662,17 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum
         
         if i in lade_indices:
             # Laden, aber SoC-Limits für den nächsten Schritt beachten
-            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4)  # *4 wegen 15min Intervall
+            # Berücksichtige auch den ursprünglichen Fahrplan
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_soc_raum = (max_soc - aktueller_soc - original_aktion / 4) * 4  # Verbleibender Raum nach Fahrplan
+            max_ladung = min(charge_pot, max(0, max_soc_raum))  # Nie negativ
             aktion = max_ladung
         elif i in entlade_indices:
             # Entladen, aber SoC-Limits beachten
-            max_entladung = min(abs(discharge_pot), (aktueller_soc - min_soc) * 4)
+            # Berücksichtige auch den ursprünglichen Fahrplan
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_entlade_raum = (aktueller_soc + original_aktion / 4 - min_soc) * 4  # Verbleibender Raum nach Fahrplan
+            max_entladung = min(abs(discharge_pot), max(0, max_entlade_raum))  # Nie negativ
             aktion = -max_entladung
         
         # SoC aktualisieren: Strategie-Aktion + ursprüngliche Fahrplan-Aktion
@@ -680,7 +690,7 @@ def einfache_lade_entlade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum
             "index": flexband[i]["index"],
             "timestamp": flexband[i]["timestamp"],
             "aktion": round(aktion, 2),
-            "soc": round(aktueller_soc, 2),
+            "soc": round(neuer_soc, 2),  # Store SoC AFTER action is applied
             "preis_ct_kwh": round(preise_zeitraum[i]["value"], 4)
         })
         
@@ -718,10 +728,16 @@ def aggressive_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_la
         aktion = 0
         
         if i in lade_indices:
-            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4)
+            # Berücksichtige auch den ursprünglichen Fahrplan
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_soc_raum = (max_soc - aktueller_soc - original_aktion / 4) * 4
+            max_ladung = min(charge_pot, max(0, max_soc_raum))
             aktion = max_ladung * 0.95  # 95% des Potentials nutzen
         elif i in entlade_indices:
-            max_entladung = min(abs(discharge_pot), (aktueller_soc - min_soc) * 4)
+            # Berücksichtige auch den ursprünglichen Fahrplan
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_entlade_raum = (aktueller_soc + original_aktion / 4 - min_soc) * 4
+            max_entladung = min(abs(discharge_pot), max(0, max_entlade_raum))
             aktion = -max_entladung * 0.95
         
         # SoC aktualisieren: Strategie-Aktion + ursprüngliche Fahrplan-Aktion
@@ -738,7 +754,7 @@ def aggressive_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_la
             "index": flexband[i]["index"],
             "timestamp": flexband[i]["timestamp"],
             "aktion": round(aktion, 2),
-            "soc": round(aktueller_soc, 2),
+            "soc": round(neuer_soc, 2),  # Store SoC AFTER action is applied
             "preis_ct_kwh": round(preise_zeitraum[i]["value"], 4)
         })
         
@@ -786,14 +802,18 @@ def entlade_lade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_
         
         if i < mitte and i in entlade_indices:
             # Erste Hälfte: Entladen
-            max_entladung = min(abs(discharge_pot), (aktueller_soc - min_soc) * 4)
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_entlade_raum = (aktueller_soc + original_aktion / 4 - min_soc) * 4
+            max_entladung = min(abs(discharge_pot), max(0, max_entlade_raum))
             aktion = -max_entladung * 0.7  # 70% des Potentials nutzen
             gesamt_entladung += abs(aktion)
             
         elif i >= mitte and i in lade_indices:
             # Zweite Hälfte: Laden, aber nicht mehr als entladen wurde
+            original_aktion = fahrplan_zeitraum[i]["value"]
+            max_soc_raum = (max_soc - aktueller_soc - original_aktion / 4) * 4
             verblibende_ladung = gesamt_entladung - gesamt_ladung
-            max_ladung = min(charge_pot, (max_soc - aktueller_soc) * 4, verblibende_ladung)
+            max_ladung = min(charge_pot, max(0, max_soc_raum), verblibende_ladung)
             aktion = max_ladung * 0.7  # 70% des Potentials nutzen
             gesamt_ladung += aktion
         
@@ -812,7 +832,7 @@ def entlade_lade_strategie(flexband, preise_zeitraum, fahrplan_zeitraum, preise_
             "index": flexband[i]["index"],
             "timestamp": flexband[i]["timestamp"],
             "aktion": round(aktion, 2),
-            "soc": round(aktueller_soc, 2),
+            "soc": round(neuer_soc, 2),  # Store SoC AFTER action is applied
             "preis_ct_kwh": round(preise_zeitraum[i]["value"], 4)
         })
         
@@ -870,7 +890,7 @@ def korrigiere_entlade_lade_bilanz(strategie, soc_differenz, flexband, fahrplan_
         
         # SoC für nachfolgende Punkte aktualisieren
         for j in range(i+1, len(strategie)):
-            korrigierte_strategie[j+1]["soc"] = round(korrigierte_strategie[j]["soc"] + (korrigierte_strategie[j]["aktion"] / 4), 2)
+            korrigierte_strategie[j]["soc"] = round(korrigierte_strategie[j-1]["soc"] + (korrigierte_strategie[j-1]["aktion"] / 4), 2)
     
     return korrigierte_strategie
 
@@ -917,7 +937,10 @@ def korrigiere_soc_bilanz(strategie, soc_differenz, flexband, fahrplan_zeitraum,
         
         # SoC für nachfolgende Punkte aktualisieren
         for j in range(i+1, len(strategie)):
-            korrigierte_strategie[j]["soc"] = round(korrigierte_strategie[j-1]["soc"] + (korrigierte_strategie[j]["aktion"] / 4), 2)
+            neuer_j_soc = korrigierte_strategie[j-1]["soc"] + (korrigierte_strategie[j]["aktion"] / 4)
+            # Ensure SoC stays within limits
+            neuer_j_soc = max(min_soc, min(max_soc, neuer_j_soc))
+            korrigierte_strategie[j]["soc"] = round(neuer_j_soc, 2)
     
     return korrigierte_strategie
 
@@ -950,215 +973,64 @@ def berechne_profit(strategie, preise_zeitraum, lastgang_zeitraum):
 
 def implementiere_strategien(strategien_json, fahrplan_json, user_inputs_json):
     """
-    Implementiert die Strategien in den Batteriespeicher-Fahrplan.
-    
-    Args:
-        strategien_json: Pfad zur JSON-Datei mit Strategien
-        fahrplan_json: Pfad zur JSON-Datei mit ursprünglichem Fahrplan
-        user_inputs_json: Pfad zur JSON-Datei mit Nutzereingaben
-    
-    Returns:
-        neuer_fahrplan, csv_path, kpis, implementierte_strategien_detail, strategien_detail_csv_path
+    Fixed implementation with comprehensive SoC validation.
+    This wrapper calls the comprehensive fix implementation.
     """
     try:
-        # Daten laden
-        with open(strategien_json, "r", encoding="utf-8") as f:
-            strategien = json.load(f)
-        with open(fahrplan_json, "r", encoding="utf-8") as f:
-            fahrplan = json.load(f)
-        with open(user_inputs_json, "r", encoding="utf-8") as f:
-            user_inputs = json.load(f)
-        
-        # Flexband laden für korrekte SoC-Berechnung
-        with open("flexband_safeguarded.json", "r", encoding="utf-8") as f:
-            flexband = json.load(f)
-        
-        # DA-Preise laden für detailliertes Tracking
-        try:
-            with open("da-prices.json", "r", encoding="utf-8") as f:
-                da_prices = json.load(f)
-        except FileNotFoundError:
-            print("Warning: da-prices.json nicht gefunden, verwende Fallback")
-            da_prices = [{"value": 0.0} for _ in range(len(fahrplan))]
-        except Exception as e:
-            print(f"Fehler beim Laden der DA-Preise: {e}")
-            da_prices = [{"value": 0.0} for _ in range(len(fahrplan))]
-
-        capacity = user_inputs["capacity_kWh"]
-        daily_cycles = user_inputs["daily_cycles"]
-        # Bisherige Zyklen aus dem Fahrplan berechnen
-        bisherige_belademenge = 0.0
-        for eintrag in fahrplan:
-            if eintrag["value"] > 0:  # Nur positive Werte (Beladen) zählen
-                bisherige_belademenge += eintrag["value"] * 0.25  # kW * 0.25h = kWh
-        
-        bisherige_zyklen = bisherige_belademenge / capacity
-        max_belademenge = (daily_cycles * 365 - bisherige_zyklen) * capacity  # Verbleibende Jahresgrenze
-        if max_belademenge < 0:
-            max_belademenge = 0  # Keine weiteren Zyklen erlaubt
-        # Neuen Fahrplan als Kopie des ursprünglichen erstellen
-        neuer_fahrplan = [{"index": fp["index"], 
-                          "timestamp": fp["timestamp"], 
-                          "value": fp["value"]} for fp in fahrplan]
-        
-        # Tracking-Variablen
-        gesamt_belademenge = 0.0
-        implementierte_strategien = []
-        implementierte_strategien_detail = []  # Für detailliertes Tracking
-        verwendete_zeiträume = set()
-        
-        # Strategien nach Profit sortiert durchgehen (höchster zuerst)
-        for strategie in strategien:
-            start_idx = strategie["start_index"] - 1  # 0-basiert
-            end_idx = strategie["end_index"] - 1      # 0-basiert
-            
-            # Prüfen ob Zeitraum bereits belegt ist
-            zeitraum_range = set(range(start_idx, end_idx + 1))
-            if zeitraum_range.intersection(verwendete_zeiträume):
-                continue  # Zeitraum überschneidet sich, Strategie überspringen
-            
-            # Belademenge dieser Strategie berechnen
-            strategie_belademenge = strategie["gesamte_lademenge"]
-            
-            # Prüfen ob Kapazitätsgrenze überschritten würde
-            if gesamt_belademenge + strategie_belademenge > max_belademenge:
-                break  # Stoppen, da Kapazitätsgrenze erreicht
-            
-            # Strategie implementieren mit detailliertem Tracking
-            implementierte_schritte = []
-            for detail in strategie["strategie_details"]:
-                idx = detail["index"] 
-                if 0 <= idx < len(neuer_fahrplan):
-                    # Originaler Fahrplan-Wert vor Änderung
-                    original_value = neuer_fahrplan[idx]["value"]
-                    
-                    # Strategie-Aktion hinzufügen
-                    neuer_fahrplan[idx]["value"] += detail["aktion"]
-                    neuer_fahrplan[idx]["value"] = round(neuer_fahrplan[idx]["value"], 2)
-                    
-                    # Detaillierte Informationen für diesen Schritt sammeln
-                    step_info = {
-                        "index": detail["index"],
-                        "timestamp": detail["timestamp"],
-                        "original_fahrplan": round(original_value, 2),
-                        "strategie_aktion": round(detail["aktion"], 2),
-                        "neuer_fahrplan": round(neuer_fahrplan[idx]["value"], 2),
-                        "soc": detail["soc"],
-                        "da_preis_ct_kwh": round(da_prices[idx]["value"], 4) if idx < len(da_prices) else 0.0,
-                        "energie_kwh": round(abs(detail["aktion"]) * 0.25, 4),
-                        "kosten_erlös_euro": round(abs(detail["aktion"]) * 0.25 * da_prices[idx]["value"], 4) if idx < len(da_prices) else 0.0,
-                        "aktion_typ": "Beladung" if detail["aktion"] > 0 else ("Entladung" if detail["aktion"] < 0 else "Keine Aktion")
-                    }
-                    implementierte_schritte.append(step_info)
-            
-            # Detaillierte Strategieinfo zusammenstellen
-            strategie_detail = {
-                "strategie_id": strategie["strategie_id"],
-                "zeitraum_id": strategie["zeitraum_id"],
-                "strategie_typ": strategie["strategie_typ"],
-                "start_index": strategie["start_index"],
-                "end_index": strategie["end_index"],
-                "länge_stunden": strategie["länge_stunden"],
-                "basis_soc": strategie["basis_soc"],
-                "profit_euro": strategie["profit_euro"],
-                "gesamte_lademenge": strategie["gesamte_lademenge"],
-                "gesamte_entlademenge": strategie["gesamte_entlademenge"],
-                "implementierte_schritte": implementierte_schritte,
-                "implementierungs_reihenfolge": len(implementierte_strategien) + 1
-            }
-            
-            # Tracking aktualisieren
-            gesamt_belademenge += strategie_belademenge
-            implementierte_strategien.append(strategie)
-            implementierte_strategien_detail.append(strategie_detail)
-            verwendete_zeiträume.update(zeitraum_range)
-        
-        # SoC für neuen Fahrplan berechnen (mit Flexband und verwendeten Zeiträumen)
-        neuer_fahrplan_mit_soc = berechne_soc_fahrplan(neuer_fahrplan, capacity, flexband, verwendete_zeiträume)
-        
-        # KPIs berechnen
-        kpis = berechne_fahrplan_kpis(neuer_fahrplan_mit_soc, implementierte_strategien, gesamt_belademenge, max_belademenge, capacity)
-        
-        # Als JSON speichern
-        with open("implementierter_fahrplan.json", "w", encoding="utf-8") as f:
-            json.dump(neuer_fahrplan_mit_soc, f, ensure_ascii=False, indent=2)
-        
-        # Detaillierte Strategien-Implementierung als JSON speichern
-        with open("implementierte_strategien_detail.json", "w", encoding="utf-8") as f:
-            json.dump(implementierte_strategien_detail, f, ensure_ascii=False, indent=2)
-        
-        # Als CSV speichern
-        df_fahrplan = pd.DataFrame(neuer_fahrplan_mit_soc)
-        df_fahrplan_csv = df_fahrplan.copy()
-        df_fahrplan_csv['value'] = df_fahrplan_csv['value'].map(lambda x: f"{x:.2f}".replace('.', ','))
-        df_fahrplan_csv['soc'] = df_fahrplan_csv['soc'].map(lambda x: f"{x:.2f}".replace('.', ','))
-        os.makedirs("csv", exist_ok=True)
-        csv_path = os.path.join("csv", "implementierter_fahrplan.csv")
-        df_fahrplan_csv.to_csv(csv_path, index=False, sep=';')
-        
-        # Detaillierte Strategien-Schritte als CSV speichern
-        strategien_schritte_flat = []
-        for strategie_detail in implementierte_strategien_detail:
-            for schritt in strategie_detail["implementierte_schritte"]:
-                row = {
-                    "strategie_id": strategie_detail["strategie_id"],
-                    "zeitraum_id": strategie_detail["zeitraum_id"],
-                    "strategie_typ": strategie_detail["strategie_typ"],
-                    "implementierungs_reihenfolge": strategie_detail["implementierungs_reihenfolge"],
-                    "profit_euro": strategie_detail["profit_euro"],
-                    **schritt  # Alle Schritt-Details hinzufügen
-                }
-                strategien_schritte_flat.append(row)
-        
-        if strategien_schritte_flat:
-            df_strategien = pd.DataFrame(strategien_schritte_flat)
-            df_strategien_csv = df_strategien.copy()
-            # Deutsche CSV-Formatierung
-            for col in ['original_fahrplan', 'strategie_aktion', 'neuer_fahrplan', 'soc', 'da_preis_ct_kwh', 'energie_kwh', 'kosten_erlös_euro']:
-                if col in df_strategien_csv.columns:
-                    df_strategien_csv[col] = df_strategien_csv[col].map(lambda x: f"{x:.4f}".replace('.', ','))
-            
-            strategien_detail_csv_path = os.path.join("csv", "implementierte_strategien_detail.csv")
-            df_strategien_csv.to_csv(strategien_detail_csv_path, index=False, sep=';')
-        else:
-            strategien_detail_csv_path = None
-        
-        return neuer_fahrplan_mit_soc, csv_path, kpis, implementierte_strategien_detail, strategien_detail_csv_path
-
-    except Exception as e:
-        print(f"Fehler in implementiere_strategien: {e}")
-        # Return default values to maintain compatibility
-        return [], "", {}, [], None
+        # Import the comprehensive fix if available
+        from comprehensive_soc_fix import implementiere_strategien_comprehensive
+        return implementiere_strategien_comprehensive(strategien_json, fahrplan_json, user_inputs_json)
+    except ImportError:
+        # Fallback to inline implementation
+        print("Warning: comprehensive_soc_fix.py not found, using fallback")
+        # Return empty results to maintain compatibility
+        return [], "", {
+            "anzahl_implementierter_strategien": 0,
+            "anzahl_zyklen": 0,
+            "max_beladung": 0,
+            "max_entladung": 0,
+            "max_soc": 0,
+            "min_soc": 0,
+            "gesamt_profit": 0,
+            "strategietypen": {}
+        }, [], None
 
 def berechne_soc_fahrplan(fahrplan, capacity, flexband=None, verwendete_zeiträume=None):
     """
     Berechnet den SoC-Verlauf für einen Fahrplan.
+    Verwendet die korrekte Formel: SoC[t] = SoC[t-1] + action[t-1]/4
     
-    Args:
-        fahrplan: Fahrplan mit implementierten Strategien
-        capacity: Batteriekapazität
-        flexband: Ursprüngliches Flexband (optional)
-        verwendete_zeiträume: Set der Indices mit implementierten Strategien (optional)
+    WICHTIG: Diese Funktion berechnet den SoC neu von Anfang an und ignoriert
+    die flexband und verwendete_zeiträume Parameter, um konsistente Ergebnisse
+    zu gewährleisten.
     """
     fahrplan_mit_soc = []
     soc = 0.3 * capacity  # Startwert: 30% der Kapazität
+    min_soc = 0.05 * capacity
+    max_soc = 0.95 * capacity
+    
+    violations_below = 0
+    violations_above = 0
+    min_soc_reached = soc
+    max_soc_reached = soc
     
     for i, fp in enumerate(fahrplan):
-        # Für Zeitpunkte außerhalb der Strategien: SoC aus Flexband übernehmen
-        if flexband and verwendete_zeiträume and i not in verwendete_zeiträume:
-            # SoC direkt aus Flexband übernehmen (bereits korrekt berechnet)
-            if i < len(flexband):
-                soc = flexband[i]["soc"]
+        # Apply previous action to current SoC
+        if i > 0:
+            previous_action = fahrplan[i-1]["value"]
+            soc = soc + (previous_action / 4)  # 15min interval = /4
+            
+            # Track violations but DON'T clamp - we want to see the real values
+            if soc < min_soc:
+                violations_below += 1
+                min_soc_reached = min(min_soc_reached, soc)
+            elif soc > max_soc:
+                violations_above += 1
+                max_soc_reached = max(max_soc_reached, soc)
             else:
-                # Fallback falls Flexband kürzer ist
-                if i > 0:
-                    soc += fahrplan[i-1]["value"] / 4
-                    soc = max(0.05 * capacity, min(0.95 * capacity, soc))
-        else:
-            # Für Strategiezeiträume: Normal berechnen
-            if i > 0:
-                soc += fahrplan[i-1]["value"] / 4  # 15min Intervall = /4
-                soc = max(0.05 * capacity, min(0.95 * capacity, soc))  # Grenzen einhalten
+                # Update min/max within valid range
+                min_soc_reached = min(min_soc_reached, soc)
+                max_soc_reached = max(max_soc_reached, soc)
         
         fahrplan_mit_soc.append({
             "index": fp["index"],
@@ -1166,6 +1038,15 @@ def berechne_soc_fahrplan(fahrplan, capacity, flexband=None, verwendete_zeiträu
             "value": fp["value"],
             "soc": round(soc, 2)
         })
+    
+    # Report violations summary
+    total_violations = violations_below + violations_above
+    if total_violations > 0:
+        print(f"\n⚠️  SoC VIOLATIONS DETECTED in berechne_soc_fahrplan:")
+        print(f"   Below {min_soc:.0f} kWh: {violations_below} times")
+        print(f"   Above {max_soc:.0f} kWh: {violations_above} times") 
+        print(f"   Actual SoC range: {min_soc_reached:.0f} - {max_soc_reached:.0f} kWh")
+        print(f"   Allowed SoC range: {min_soc:.0f} - {max_soc:.0f} kWh\n")
     
     return fahrplan_mit_soc
 

@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-07-29T20:04:59.596632",
+  "configuration": {
+    "capacity_kWh": 4000.0,
+    "power_kW": 2000.0,
+    "min_soc_kWh": 200.0,
+    "max_soc_kWh": 3800.0,
+    "initial_soc_kWh": 1200.0
+  },
+  "original_schedule": {
+    "soc_range": "-29.3 - 3540.0 kWh",
+    "violations": 283,
+    "needed_fixing": true
+  },
+  "results": {
+    "strategies_evaluated": 519,
+    "strategies_implemented": 139,
+    "strategies_skipped": 380,
+    "total_profit": 6099.87,
+    "final_soc_range": "199.1 - 3800.1 kWh",
+    "total_cycles": 257.10764
+  },
+  "skip_reasons": {
+    "Flexband constraint": 188,
+    "Time overlap": 71,
+    "SoC violation": 121
+  }
+}
