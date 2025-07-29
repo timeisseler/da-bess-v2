@@ -328,7 +328,7 @@ def finde_flexible_arbitrage_zeiträume(flexband_safeguarded, fahrplan_json, min
             aktivität_ok = next_aktivität <= aktivitäts_schwelle
             
             # Wenn eines der Kriterien erfüllt ist, erweitere den Zeitraum
-            if soc_ok or aktivität_ok:
+            if soc_ok and aktivität_ok:
                 i += 1
             else:
                 break
